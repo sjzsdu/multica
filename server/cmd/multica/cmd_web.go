@@ -256,9 +256,6 @@ func prepareLocalWebBackend(options embeddedWebOptions) (localWebBackend, error)
 		return localWebBackend{}, err
 	}
 	fmt.Printf("Local .env detected: %s\n", envFile)
-	if err := ensureDockerReadyForLocalWeb(); err != nil {
-		return localWebBackend{}, err
-	}
 	fmt.Println("Preparing local PostgreSQL and migrations...")
 	if err := runWebSetupCommand(root, env, "bash", "scripts/ensure-postgres.sh", ".env"); err != nil {
 		return localWebBackend{}, err
@@ -355,19 +352,6 @@ func runWebSetupCommand(dir string, env []string, name string, args ...string) e
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
-	}
-	return nil
-}
-
-func ensureDockerReadyForLocalWeb() error {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return errors.New("local multica web needs Docker to start PostgreSQL from .env; install Docker or run `multica web --local=false --api-url <backend-url>`")
-	}
-	cmd := exec.Command("docker", "info")
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return errors.New("local multica web needs Docker running to start PostgreSQL from .env; start Docker Desktop and run `multica web` again, or use `multica web --local=false --api-url <backend-url>`")
 	}
 	return nil
 }
