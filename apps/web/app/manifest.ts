@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+export const dynamic = "force-static";
+
 /**
  * Web app manifest — what makes the mobile web app installable and lets it run
  * in its own window instead of a browser tab.
