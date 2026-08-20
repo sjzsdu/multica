@@ -39,6 +39,7 @@ var ErrSignupProhibited = SignupError{Message: "user registration is disabled on
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
+const localAuthEnv = "MULTICA_LOCAL_AUTH"
 
 // supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
 // Keep both lists in sync when adding a locale — the user-controlled `language`
@@ -363,6 +364,59 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	_ = h.Queries.DeleteExpiredVerificationCodes(r.Context())
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Verification code sent"})
+}
+
+func isLocalAuthEnabled() bool {
+	value := strings.TrimSpace(os.Getenv(localAuthEnv))
+	return strings.EqualFold(value, "1") || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes") || strings.EqualFold(value, "on")
+}
+
+func localAuthEmail() string {
+	if email := strings.ToLower(strings.TrimSpace(os.Getenv("MULTICA_LOCAL_AUTH_EMAIL"))); email != "" {
+		return email
+	}
+	return "local@multica.dev"
+}
+
+func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	if !isLocalAuthEnabled() {
+		writeError(w, http.StatusNotFound, "local auth is not enabled")
+		return
+	}
+
+	user, isNew, err := h.findOrCreateUser(r.Context(), localAuthEmail())
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create local user")
+		return
+	}
+	if isNew {
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, "local_auth"))
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set local auth cookies", "error", err)
+	}
+
+	slog.Info("local user logged in", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{Token: tokenString, User: h.userToResponse(user)})
 }
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {

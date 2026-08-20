@@ -267,6 +267,11 @@ func prepareLocalWebBackend(options embeddedWebOptions) (localWebBackend, error)
 	if port == "" {
 		port = "8080"
 	}
+	port, err = resolveLocalBackendPort(port)
+	if err != nil {
+		return localWebBackend{}, err
+	}
+	env = upsertEnv(env, "PORT", port)
 	return localWebBackend{
 		Enabled: true,
 		Command: "go run ./cmd/server",
@@ -274,6 +279,30 @@ func prepareLocalWebBackend(options embeddedWebOptions) (localWebBackend, error)
 		Env:     env,
 		APIURL:  "http://127.0.0.1:" + port,
 	}, nil
+}
+
+func resolveLocalBackendPort(preferred string) (string, error) {
+	preferred = strings.TrimSpace(preferred)
+	if preferred == "" {
+		preferred = "8080"
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", preferred))
+	if err == nil {
+		_ = listener.Close()
+		return preferred, nil
+	}
+
+	listener, err = net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	defer listener.Close()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		return "", err
+	}
+	fmt.Printf("Backend port %s is busy; using %s for this multica web session.\n", preferred, port)
+	return port, nil
 }
 
 func discoverLocalWebProject(start string) (string, bool) {

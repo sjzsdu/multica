@@ -275,6 +275,21 @@ export function AuthInitializer({
       } catch (err) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
+          if (cookieAuth) {
+            try {
+              const { user } = await api.localLogin();
+              if (cancelled) return;
+              settled = true;
+              window.removeEventListener("online", retryNow);
+              onAuthSuccess(user);
+              warmWorkspaces();
+              return;
+            } catch (localErr) {
+              if (!(localErr instanceof ApiError) || localErr.status !== 404) {
+                logger.error("local auth bootstrap failed", localErr);
+              }
+            }
+          }
           rejectSession();
           return;
         }
