@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +34,16 @@ type embeddedWebOptions struct {
 	OpenBrowser    bool
 	APIURL         string
 	BackendCommand string
+	Local          bool
+	ConfigAPIURL   string
+}
+
+type localWebBackend struct {
+	Enabled bool
+	Command string
+	WorkDir string
+	Env     []string
+	APIURL  string
 }
 
 var webCmd = &cobra.Command{
@@ -45,14 +57,18 @@ var webCmd = &cobra.Command{
 		openBrowser, _ := cmd.Flags().GetBool("open")
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		backendCommand, _ := cmd.Flags().GetString("backend-command")
+		local, _ := cmd.Flags().GetBool("local")
+		configAPIURL := ""
 		if apiURL == "" {
-			apiURL = tryResolveWebAPIURL(cmd)
+			configAPIURL = tryResolveWebAPIURL(cmd)
 		}
 		return runEmbeddedWebWithOptions(embeddedWebOptions{
 			Addr:           addr,
 			OpenBrowser:    openBrowser,
 			APIURL:         apiURL,
 			BackendCommand: backendCommand,
+			Local:          local,
+			ConfigAPIURL:   configAPIURL,
 		})
 	},
 }
@@ -62,10 +78,11 @@ func init() {
 	webCmd.Flags().Bool("open", true, "open the web UI in the default browser")
 	webCmd.Flags().String("api-url", "", "backend API origin for the web UI (defaults to --server-url, MULTICA_SERVER_URL, or config server_url when set)")
 	webCmd.Flags().String("backend-command", "", "optional command to start before the web UI, such as 'server/bin/server' or 'make server'")
+	webCmd.Flags().Bool("local", true, "when a local .env and server source are present, prepare PostgreSQL, run migrations, and start the backend automatically")
 }
 
 func runEmbeddedWeb(addr string, openBrowser bool) error {
-	return runEmbeddedWebWithOptions(embeddedWebOptions{Addr: addr, OpenBrowser: openBrowser})
+	return runEmbeddedWebWithOptions(embeddedWebOptions{Addr: addr, OpenBrowser: openBrowser, Local: false})
 }
 
 func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
@@ -85,6 +102,19 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 	webAddr, err := resolveWebListenAddr(options.Addr)
 	if err != nil {
 		return err
+	}
+	localBackend, err := prepareLocalWebBackend(options)
+	if err != nil {
+		return err
+	}
+	if localBackend.Enabled && options.APIURL == "" {
+		options.APIURL = localBackend.APIURL
+	}
+	if localBackend.Enabled && options.BackendCommand == "" {
+		options.BackendCommand = localBackend.Command
+	}
+	if options.APIURL == "" {
+		options.APIURL = options.ConfigAPIURL
 	}
 	if options.APIURL != "" {
 		options.APIURL, err = normalizeWebAPIURL(options.APIURL)
@@ -110,7 +140,7 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	backendCmd, err := startWebBackendCommand(ctx, options.BackendCommand)
+	backendCmd, err := startWebBackendCommand(ctx, options.BackendCommand, localBackend.WorkDir, localBackend.Env)
 	if err != nil {
 		return err
 	}
@@ -212,6 +242,136 @@ func tryResolveWebAPIURL(cmd *cobra.Command) string {
 	return tryResolveProfileServerURL(cmd)
 }
 
+func prepareLocalWebBackend(options embeddedWebOptions) (localWebBackend, error) {
+	if !options.Local || options.APIURL != "" || options.BackendCommand != "" {
+		return localWebBackend{}, nil
+	}
+	root, ok := discoverLocalWebProject(".")
+	if !ok {
+		return localWebBackend{}, nil
+	}
+	envFile := filepath.Join(root, ".env")
+	env, vars, err := envFromDotEnv(envFile)
+	if err != nil {
+		return localWebBackend{}, err
+	}
+	fmt.Printf("Local .env detected: %s\n", envFile)
+	if err := ensureDockerReadyForLocalWeb(); err != nil {
+		return localWebBackend{}, err
+	}
+	fmt.Println("Preparing local PostgreSQL and migrations...")
+	if err := runWebSetupCommand(root, env, "bash", "scripts/ensure-postgres.sh", ".env"); err != nil {
+		return localWebBackend{}, err
+	}
+	if err := runWebSetupCommand(filepath.Join(root, "server"), env, "go", "run", "./cmd/migrate", "up"); err != nil {
+		return localWebBackend{}, err
+	}
+	port := strings.TrimSpace(vars["PORT"])
+	if port == "" {
+		port = "8080"
+	}
+	return localWebBackend{
+		Enabled: true,
+		Command: "go run ./cmd/server",
+		WorkDir: filepath.Join(root, "server"),
+		Env:     env,
+		APIURL:  "http://127.0.0.1:" + port,
+	}, nil
+}
+
+func discoverLocalWebProject(start string) (string, bool) {
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		return "", false
+	}
+	for {
+		if fileExists(filepath.Join(dir, ".env")) && fileExists(filepath.Join(dir, "server", "cmd", "server", "main.go")) && fileExists(filepath.Join(dir, "scripts", "ensure-postgres.sh")) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func envFromDotEnv(path string) ([]string, map[string]string, error) {
+	vars, err := parseDotEnvFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	env := os.Environ()
+	for key, value := range vars {
+		env = upsertEnv(env, key, value)
+	}
+	return env, vars, nil
+}
+
+func parseDotEnvFile(path string) (map[string]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	vars := map[string]string{}
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || strings.ContainsAny(key, " \t") {
+			continue
+		}
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		}
+		vars[key] = value
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return vars, nil
+}
+
+func runWebSetupCommand(dir string, env []string, name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+func ensureDockerReadyForLocalWeb() error {
+	if _, err := exec.LookPath("docker"); err != nil {
+		return errors.New("local multica web needs Docker to start PostgreSQL from .env; install Docker or run `multica web --local=false --api-url <backend-url>`")
+	}
+	cmd := exec.Command("docker", "info")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Run(); err != nil {
+		return errors.New("local multica web needs Docker running to start PostgreSQL from .env; start Docker Desktop and run `multica web` again, or use `multica web --local=false --api-url <backend-url>`")
+	}
+	return nil
+}
+
 func embeddedWebEnv(base []string, addr, apiURL string, nodePathDirs []string) []string {
 	host, port, _ := net.SplitHostPort(addr)
 	env := append([]string{}, base...)
@@ -287,7 +447,7 @@ func embeddedWebNodePath(pnpmDir string) ([]string, error) {
 	return dirs, nil
 }
 
-func startWebBackendCommand(ctx context.Context, command string) (*exec.Cmd, error) {
+func startWebBackendCommand(ctx context.Context, command, workDir string, env []string) (*exec.Cmd, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return nil, nil
@@ -302,7 +462,14 @@ func startWebBackendCommand(ctx context.Context, command string) (*exec.Cmd, err
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
+	if env != nil {
+		cmd.Env = env
+	} else {
+		cmd.Env = os.Environ()
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start --backend-command: %w", err)
 	}

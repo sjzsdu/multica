@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -52,6 +54,48 @@ func TestNormalizeWebAPIURLRejectsInvalid(t *testing.T) {
 	_, err := normalizeWebAPIURL("ftp://example.com")
 	if err == nil || !strings.Contains(err.Error(), "invalid --api-url") {
 		t.Fatalf("expected invalid --api-url error, got %v", err)
+	}
+}
+
+func TestParseDotEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("# comment\nPORT=19090\nexport POSTGRES_DB=multica_test\nQUOTED=\"hello world\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vars, err := parseDotEnvFile(path)
+	if err != nil {
+		t.Fatalf("parseDotEnvFile: %v", err)
+	}
+	if vars["PORT"] != "19090" || vars["POSTGRES_DB"] != "multica_test" || vars["QUOTED"] != "hello world" {
+		t.Fatalf("unexpected vars: %#v", vars)
+	}
+}
+
+func TestDiscoverLocalWebProject(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("PORT=18080\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "server", "cmd", "server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "server", "cmd", "server", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "ensure-postgres.sh"), []byte("#!/usr/bin/env bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "apps", "web")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := discoverLocalWebProject(nested)
+	if !ok || got != root {
+		t.Fatalf("got %q, %v; want %q, true", got, ok, root)
 	}
 }
 
