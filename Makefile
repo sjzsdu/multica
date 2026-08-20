@@ -351,6 +351,13 @@ build-web-embed: ## Build the web frontend into server/cmd/multica/web_dist for 
 	printf '%s\n%s\n' 'This directory is populated by `make build-web-embed` before compiling `multica`.' 'Keep this file so `go:embed all:web_dist` has a stable path in source checkouts.' > server/cmd/multica/web_dist/README.txt
 
 
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: build ## Build and install the multica CLI into INSTALL_DIR (default: ~/.local/bin)
+	mkdir -p "$(INSTALL_DIR)"
+	install -m 0755 server/bin/multica "$(INSTALL_DIR)/multica"
+	@echo "✓ Installed multica to $(INSTALL_DIR)/multica"
+
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
