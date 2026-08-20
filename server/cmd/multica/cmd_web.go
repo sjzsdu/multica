@@ -35,15 +35,17 @@ type embeddedWebOptions struct {
 	APIURL         string
 	BackendCommand string
 	Local          bool
+	StartDaemon    bool
 	ConfigAPIURL   string
 }
 
 type localWebBackend struct {
-	Enabled bool
-	Command string
-	WorkDir string
-	Env     []string
-	APIURL  string
+	Enabled   bool
+	Command   string
+	WorkDir   string
+	Env       []string
+	APIURL    string
+	LocalAuth bool
 }
 
 var webCmd = &cobra.Command{
@@ -58,6 +60,7 @@ var webCmd = &cobra.Command{
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		backendCommand, _ := cmd.Flags().GetString("backend-command")
 		local, _ := cmd.Flags().GetBool("local")
+		startDaemon, _ := cmd.Flags().GetBool("daemon")
 		configAPIURL := ""
 		if apiURL == "" {
 			configAPIURL = tryResolveWebAPIURL(cmd)
@@ -68,6 +71,7 @@ var webCmd = &cobra.Command{
 			APIURL:         apiURL,
 			BackendCommand: backendCommand,
 			Local:          local,
+			StartDaemon:    startDaemon,
 			ConfigAPIURL:   configAPIURL,
 		})
 	},
@@ -79,6 +83,7 @@ func init() {
 	webCmd.Flags().String("api-url", "", "backend API origin for the web UI (defaults to --server-url, MULTICA_SERVER_URL, or config server_url when set)")
 	webCmd.Flags().String("backend-command", "", "optional command to start before the web UI, such as 'server/bin/server' or 'make server'")
 	webCmd.Flags().Bool("local", true, "when a local .env and server source are present, prepare PostgreSQL, run migrations, and start the backend automatically")
+	webCmd.Flags().Bool("daemon", false, "in local mode, authenticate the CLI and start the local agent daemon too")
 }
 
 func runEmbeddedWeb(addr string, openBrowser bool) error {
@@ -158,6 +163,30 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 	cmd.Env = embeddedWebEnv(os.Environ(), webAddr, options.APIURL, nodePathDirs)
 
 	url := webURL(webAddr)
+	if localBackend.Enabled {
+		state := localWebState{
+			FrontendURL: url,
+			BackendURL:  options.APIURL,
+			LocalAuth:   localBackend.LocalAuth,
+			PID:         os.Getpid(),
+		}
+		if err := saveLocalWebState(state); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not write local web state: %v\n", err)
+		}
+		if options.StartDaemon {
+			if err := waitForLocalBackend(options.APIURL, 30*time.Second); err != nil {
+				return err
+			}
+			if state.LocalAuth {
+				if err := ensureLocalCLIAuth(rootCmd, options.APIURL, url); err != nil {
+					return err
+				}
+			}
+			if err := runDaemonStart(daemonStartCmd, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not start daemon automatically: %v\n", err)
+			}
+		}
+	}
 	if options.OpenBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
@@ -181,6 +210,17 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 		return err
 	}
 	return nil
+}
+
+func waitForLocalBackend(url string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if probeLocalBackend(url) {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("local backend did not become ready at %s within %s", url, timeout)
 }
 
 func embeddedWebBundlePresent(assets fs.FS) bool {
@@ -273,11 +313,12 @@ func prepareLocalWebBackend(options embeddedWebOptions) (localWebBackend, error)
 	}
 	env = upsertEnv(env, "PORT", port)
 	return localWebBackend{
-		Enabled: true,
-		Command: "go run ./cmd/server",
-		WorkDir: filepath.Join(root, "server"),
-		Env:     env,
-		APIURL:  "http://127.0.0.1:" + port,
+		Enabled:   true,
+		Command:   "go run ./cmd/server",
+		WorkDir:   filepath.Join(root, "server"),
+		Env:       env,
+		APIURL:    "http://127.0.0.1:" + port,
+		LocalAuth: localFlagEnabled(vars["MULTICA_LOCAL_AUTH"]),
 	}, nil
 }
 
