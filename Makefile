@@ -358,6 +358,13 @@ install: build ## Build and install the multica CLI into INSTALL_DIR (default: ~
 	install -m 0755 server/bin/multica "$(INSTALL_DIR)/multica"
 	@echo "✓ Installed multica to $(INSTALL_DIR)/multica"
 
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: build ## Build and install the multica CLI into INSTALL_DIR (default: ~/.local/bin)
+	mkdir -p "$(INSTALL_DIR)"
+	install -m 0755 server/bin/multica "$(INSTALL_DIR)/multica"
+	@echo "✓ Installed multica to $(INSTALL_DIR)/multica"
+
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
