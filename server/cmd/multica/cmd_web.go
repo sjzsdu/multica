@@ -35,7 +35,7 @@ type embeddedWebOptions struct {
 	APIURL         string
 	BackendCommand string
 	Local          bool
-	StartDaemon    bool
+	KeepDaemon     bool
 	ConfigAPIURL   string
 }
 
@@ -60,7 +60,7 @@ var webCmd = &cobra.Command{
 		apiURL, _ := cmd.Flags().GetString("api-url")
 		backendCommand, _ := cmd.Flags().GetString("backend-command")
 		local, _ := cmd.Flags().GetBool("local")
-		startDaemon, _ := cmd.Flags().GetBool("daemon")
+		keepDaemon, _ := cmd.Flags().GetBool("daemon")
 		configAPIURL := ""
 		if apiURL == "" {
 			configAPIURL = tryResolveWebAPIURL(cmd)
@@ -71,7 +71,7 @@ var webCmd = &cobra.Command{
 			APIURL:         apiURL,
 			BackendCommand: backendCommand,
 			Local:          local,
-			StartDaemon:    startDaemon,
+			KeepDaemon:     keepDaemon,
 			ConfigAPIURL:   configAPIURL,
 		})
 	},
@@ -83,7 +83,7 @@ func init() {
 	webCmd.Flags().String("api-url", "", "backend API origin for the web UI (defaults to --server-url, MULTICA_SERVER_URL, or config server_url when set)")
 	webCmd.Flags().String("backend-command", "", "optional command to start before the web UI, such as 'server/bin/server' or 'make server'")
 	webCmd.Flags().Bool("local", true, "when a local .env and server source are present, prepare PostgreSQL, run migrations, and start the backend automatically")
-	webCmd.Flags().Bool("daemon", false, "in local mode, authenticate the CLI and start the local agent daemon too")
+	webCmd.Flags().Bool("daemon", false, "keep the local agent daemon running after the web command exits")
 }
 
 func runEmbeddedWeb(addr string, openBrowser bool) error {
@@ -173,18 +173,22 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 		if err := saveLocalWebState(state); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not write local web state: %v\n", err)
 		}
-		if options.StartDaemon {
-			if err := waitForLocalBackend(options.APIURL, 30*time.Second); err != nil {
+		if err := waitForLocalBackend(options.APIURL, 30*time.Second); err != nil {
+			return err
+		}
+		if state.LocalAuth {
+			if err := ensureLocalCLIAuth(rootCmd, options.APIURL, url); err != nil {
 				return err
 			}
-			if state.LocalAuth {
-				if err := ensureLocalCLIAuth(rootCmd, options.APIURL, url); err != nil {
-					return err
-				}
-			}
-			if err := runDaemonStart(daemonStartCmd, nil); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not start daemon automatically: %v\n", err)
-			}
+		}
+		// Avoid stale-port leaks: a daemon from a previous web session may still be
+		// running against an old random backend port. Stop it before starting the
+		// daemon for this session so runtime heartbeats point at the current backend.
+		_ = runDaemonStop(daemonStopCmd, nil)
+		if err := runDaemonStart(daemonStartCmd, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not start daemon automatically: %v\n", err)
+		} else if !options.KeepDaemon {
+			defer func() { _ = runDaemonStop(daemonStopCmd, nil) }()
 		}
 	}
 	if options.OpenBrowser {
