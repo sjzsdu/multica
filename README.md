@@ -94,6 +94,8 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 
 ## Get started
 
+### Cloud or Desktop
+
 No terminal required: sign up at **[multica.ai](https://multica.ai)**, or download
 **[Multica Desktop](https://multica.ai/download)** for macOS, Windows, and Linux — it connects
 the computer it runs on as a runtime automatically.
@@ -101,6 +103,49 @@ the computer it runs on as a runtime automatically.
 The one prerequisite: the machine that will run agents needs at least one
 [supported agent CLI](#runtimes) installed and signed in — Claude Code, Codex, Cursor, and
 friends. Multica drives them; it doesn't ship them.
+
+### Local all-in-one web from a checkout
+
+If you want a fully local trial from this repository, build and install the embedded CLI, then
+start the whole stack with one command:
+
+```bash
+make install
+multica web
+```
+
+`make install` builds the Next.js web app as an embedded standalone bundle, builds the Go CLI, and
+installs `multica` to `~/.local/bin/multica`. Make sure `~/.local/bin` is on your `PATH`.
+
+`multica web` starts the embedded web UI, the local Go backend, PostgreSQL setup and migrations,
+local auth, and the agent daemon. In foreground mode, pressing `Ctrl-C` stops the web/backend
+processes and the daemon so random ports are not left behind. Use `multica web --daemon` when you
+want the local daemon to remain running after the web command exits.
+
+Requirements for local all-in-one mode:
+
+- Node.js, because the embedded frontend is a Next.js standalone server that still runs on Node.
+- Go and pnpm, when building from source with `make install`.
+- PostgreSQL with pgvector. Docker is not required if you already run PostgreSQL locally.
+- At least one supported agent CLI installed and authenticated on the machine running the daemon.
+
+For a local Homebrew PostgreSQL setup, put the local mode settings in `.env` before running
+`multica web`:
+
+```env
+MULTICA_POSTGRES_MODE=local
+MULTICA_LOCAL_AUTH=true
+MULTICA_LOCAL_AUTH_EMAIL=local@multica.dev
+```
+
+Useful local commands:
+
+```bash
+multica local status   # show the current local web/backend session
+multica local login    # create and store a local CLI token
+multica auth status    # show which backend the CLI is authenticated against
+multica daemon status  # show runtime/daemon state
+```
 
 <details>
 <summary><b>Self-hosting the whole thing</b></summary>
