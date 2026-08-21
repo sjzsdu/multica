@@ -237,20 +237,29 @@ func stopLocalWebSession(timeout time.Duration) error {
 		return nil
 	}
 	_ = runDaemonStop(daemonStopCmd, nil)
-	if state.PID <= 0 || !processAlive(state.PID) {
-		return nil
-	}
-	if err := signalProcess(state.PID, syscall.SIGTERM); err != nil {
-		return err
-	}
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !processAlive(state.PID) {
-			return nil
+	if state.PID > 0 && processAlive(state.PID) {
+		if err := signalProcessGroup(state.PID, syscall.SIGTERM); err != nil {
+			_ = signalProcess(state.PID, syscall.SIGTERM)
 		}
-		time.Sleep(200 * time.Millisecond)
+		deadline := time.Now().Add(timeout)
+		for time.Now().Before(deadline) {
+			if !processAlive(state.PID) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if processAlive(state.PID) {
+			if err := signalProcessGroup(state.PID, syscall.SIGKILL); err != nil {
+				_ = signalProcess(state.PID, syscall.SIGKILL)
+			}
+		}
 	}
-	return signalProcess(state.PID, syscall.SIGKILL)
+	// If a previous implementation killed only the parent multica process, the
+	// Go-built server child may be reparented to launchd and keep logging. Clean
+	// up listeners for the recorded local frontend/backend ports as a safety net.
+	_ = stopLocalListenerForURL(state.FrontendURL)
+	_ = stopLocalListenerForURL(state.BackendURL)
+	return nil
 }
 
 func localWebProfileDir() (string, error) {
@@ -297,6 +306,38 @@ func signalProcess(pid int, sig os.Signal) error {
 		return err
 	}
 	return process.Signal(sig)
+}
+
+func stopLocalListenerForURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(parsed.Host)
+	if err != nil || port == "" || !isLoopbackHost(host) {
+		return nil
+	}
+	lsof, err := exec.LookPath("lsof")
+	if err != nil {
+		return nil
+	}
+	out, err := exec.Command(lsof, "-tiTCP:"+port, "-sTCP:LISTEN").Output()
+	if err != nil {
+		return nil
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || pid <= 0 || pid == os.Getpid() {
+			continue
+		}
+		_ = signalProcess(pid, syscall.SIGTERM)
+	}
+	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.Trim(host, "[]")
+	return host == "" || host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
