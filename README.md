@@ -117,9 +117,9 @@ multica web
 `make install` builds the Next.js web app as an embedded standalone bundle, builds the Go CLI, and
 installs `multica` to `~/.local/bin/multica`. Make sure `~/.local/bin` is on your `PATH`.
 
-`multica web` starts the embedded web UI, the local Go backend, PostgreSQL setup and migrations,
+`multica web` starts the embedded web UI on `http://127.0.0.1:9393`, plus the local Go backend, PostgreSQL setup and migrations,
 local auth, and the agent daemon. In foreground mode, pressing `Ctrl-C` stops the web/backend
-processes and the daemon so random ports are not left behind.
+processes and the daemon so stale local services are not left behind.
 
 Use daemon mode when you want the whole local stack to detach from the current terminal:
 

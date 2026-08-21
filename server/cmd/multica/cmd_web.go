@@ -97,7 +97,7 @@ var webRestartCmd = &cobra.Command{
 }
 
 func init() {
-	webCmd.Flags().String("addr", "127.0.0.1:0", "address for the bundled web UI; use port 0 to pick a free port")
+	webCmd.Flags().String("addr", "127.0.0.1:9393", "address for the bundled web UI")
 	webCmd.Flags().Bool("open", true, "open the web UI in the default browser")
 	webCmd.Flags().String("api-url", "", "backend API origin for the web UI (defaults to --server-url, MULTICA_SERVER_URL, or config server_url when set)")
 	webCmd.Flags().String("backend-command", "", "optional command to start before the web UI, such as 'server/bin/server' or 'make server'")
@@ -203,7 +203,7 @@ func runWebRestart(cmd *cobra.Command, _ []string) error {
 	if err := stopLocalWebSession(10 * time.Second); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not stop previous local web session: %v\n", err)
 	}
-	return startEmbeddedWebDaemon(embeddedWebOptions{Addr: "127.0.0.1:0", OpenBrowser: false, Local: true, KeepDaemon: true})
+	return startEmbeddedWebDaemon(embeddedWebOptions{Addr: "127.0.0.1:9393", OpenBrowser: false, Local: true, KeepDaemon: true})
 }
 
 func waitForWebDaemonState(pid int, timeout time.Duration) (localWebState, error) {
