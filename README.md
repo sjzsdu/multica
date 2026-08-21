@@ -119,8 +119,19 @@ installs `multica` to `~/.local/bin/multica`. Make sure `~/.local/bin` is on you
 
 `multica web` starts the embedded web UI, the local Go backend, PostgreSQL setup and migrations,
 local auth, and the agent daemon. In foreground mode, pressing `Ctrl-C` stops the web/backend
-processes and the daemon so random ports are not left behind. Use `multica web --daemon` when you
-want the local daemon to remain running after the web command exits.
+processes and the daemon so random ports are not left behind.
+
+Use daemon mode when you want the whole local stack to detach from the current terminal:
+
+```bash
+multica web --daemon   # start frontend, backend, local auth, and daemon in the background
+multica web status     # show URLs, PID, binary version, and log path
+multica web stop       # stop frontend, backend, and daemon
+multica web restart    # stop the old session and start again with the current multica binary
+```
+
+After updating the CLI with `make install`, run `multica web restart` so the background session is
+recreated with the newly installed binary instead of an older process.
 
 Requirements for local all-in-one mode:
 

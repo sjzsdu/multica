@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -77,20 +78,231 @@ var webCmd = &cobra.Command{
 	},
 }
 
+var webStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show the local web daemon session",
+	RunE:  runWebStatus,
+}
+
+var webStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the local web daemon session",
+	RunE:  runWebStop,
+}
+
+var webRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the local web daemon session using the current multica binary",
+	RunE:  runWebRestart,
+}
+
 func init() {
 	webCmd.Flags().String("addr", "127.0.0.1:0", "address for the bundled web UI; use port 0 to pick a free port")
 	webCmd.Flags().Bool("open", true, "open the web UI in the default browser")
 	webCmd.Flags().String("api-url", "", "backend API origin for the web UI (defaults to --server-url, MULTICA_SERVER_URL, or config server_url when set)")
 	webCmd.Flags().String("backend-command", "", "optional command to start before the web UI, such as 'server/bin/server' or 'make server'")
 	webCmd.Flags().Bool("local", true, "when a local .env and server source are present, prepare PostgreSQL, run migrations, and start the backend automatically")
-	webCmd.Flags().Bool("daemon", false, "keep the local agent daemon running after the web command exits")
+	webCmd.Flags().Bool("daemon", false, "run the full local web stack in the background")
+	webCmd.AddCommand(webStatusCmd, webStopCmd, webRestartCmd)
 }
 
 func runEmbeddedWeb(addr string, openBrowser bool) error {
 	return runEmbeddedWebWithOptions(embeddedWebOptions{Addr: addr, OpenBrowser: openBrowser, Local: false})
 }
 
+func startEmbeddedWebDaemon(options embeddedWebOptions) error {
+	if err := stopLocalWebSession(5 * time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not stop previous local web session: %v\n", err)
+	}
+	exe := currentExecutablePath()
+	if exe == "" {
+		return errors.New("could not resolve current multica binary path")
+	}
+	profileDir, err := localWebProfileDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		return err
+	}
+	logPath := filepath.Join(profileDir, "local-web.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	args := []string{"web", "--addr", options.Addr, "--open=false"}
+	if options.APIURL != "" {
+		args = append(args, "--api-url", options.APIURL)
+	}
+	if options.BackendCommand != "" {
+		args = append(args, "--backend-command", options.BackendCommand)
+	}
+	if !options.Local {
+		args = append(args, "--local=false")
+	}
+	args = append(args, "--daemon")
+
+	cmd := exec.Command(exe, args...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Env = upsertEnv(upsertEnv(os.Environ(), "MULTICA_WEB_FOREGROUND", "1"), "MULTICA_WEB_LOG", logPath)
+	cmd.SysProcAttr = detachedProcessAttrs()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start local web daemon: %w", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Process.Release(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "Multica local web daemon starting (pid %d)\n", pid)
+	fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
+	state, err := waitForWebDaemonState(pid, 45*time.Second)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "Frontend: %s\n", state.FrontendURL)
+	fmt.Fprintf(os.Stdout, "Backend:  %s\n", state.BackendURL)
+	return nil
+}
+
+func runWebStatus(cmd *cobra.Command, _ []string) error {
+	state, err := loadLocalWebState()
+	if err != nil {
+		return err
+	}
+	running := state.PID > 0 && processAlive(state.PID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Status:   %s\n", map[bool]string{true: "running", false: "stopped"}[running])
+	fmt.Fprintf(cmd.OutOrStdout(), "Frontend: %s\n", valueOrDefault(state.FrontendURL, "(unknown)"))
+	fmt.Fprintf(cmd.OutOrStdout(), "Backend:  %s\n", valueOrDefault(state.BackendURL, "(unknown)"))
+	fmt.Fprintf(cmd.OutOrStdout(), "PID:      %d\n", state.PID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Mode:     %s\n", valueOrDefault(state.Mode, "foreground"))
+	if state.BinaryPath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Binary:   %s\n", state.BinaryPath)
+	}
+	if state.Version != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Version:  %s\n", state.Version)
+	}
+	if state.LogPath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Logs:     %s\n", state.LogPath)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Updated:  %s\n", state.UpdatedAt.Format(time.RFC3339))
+	return nil
+}
+
+func runWebStop(cmd *cobra.Command, _ []string) error {
+	if err := stopLocalWebSession(10 * time.Second); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Multica local web stopped")
+	return nil
+}
+
+func runWebRestart(cmd *cobra.Command, _ []string) error {
+	if err := stopLocalWebSession(10 * time.Second); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not stop previous local web session: %v\n", err)
+	}
+	return startEmbeddedWebDaemon(embeddedWebOptions{Addr: "127.0.0.1:0", OpenBrowser: false, Local: true, KeepDaemon: true})
+}
+
+func waitForWebDaemonState(pid int, timeout time.Duration) (localWebState, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		state, err := loadLocalWebState()
+		if err == nil && state.PID == pid && state.FrontendURL != "" && state.BackendURL != "" && probeLocalBackend(state.BackendURL) && probeWebFrontend(state.FrontendURL) {
+			return state, nil
+		}
+		if !processAlive(pid) {
+			return localWebState{}, errors.New("local web daemon exited during startup; check `multica web status` logs")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return localWebState{}, errors.New("local web daemon did not become ready in time; check `multica web status` logs")
+}
+
+func probeWebFrontend(url string) bool {
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(strings.TrimRight(url, "/"))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 500
+}
+
+func stopLocalWebSession(timeout time.Duration) error {
+	state, err := loadLocalWebState()
+	if err != nil {
+		return nil
+	}
+	_ = runDaemonStop(daemonStopCmd, nil)
+	if state.PID <= 0 || !processAlive(state.PID) {
+		return nil
+	}
+	if err := signalProcess(state.PID, syscall.SIGTERM); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processAlive(state.PID) {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return signalProcess(state.PID, syscall.SIGKILL)
+}
+
+func localWebProfileDir() (string, error) {
+	path, err := localWebStatePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(path), nil
+}
+
+func currentExecutablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
+}
+
+func webStateMode(detached bool) string {
+	if detached {
+		return "daemon"
+	}
+	return "foreground"
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+func signalProcess(pid int, sig os.Signal) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(sig)
+}
+
 func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
+	if options.KeepDaemon && os.Getenv("MULTICA_WEB_FOREGROUND") != "1" {
+		return startEmbeddedWebDaemon(options)
+	}
 	assets, err := fs.Sub(webAssets, "web_dist")
 	if err != nil {
 		return err
@@ -169,6 +381,11 @@ func runEmbeddedWebWithOptions(options embeddedWebOptions) error {
 			BackendURL:  options.APIURL,
 			LocalAuth:   localBackend.LocalAuth,
 			PID:         os.Getpid(),
+			Mode:        webStateMode(options.KeepDaemon),
+			BinaryPath:  currentExecutablePath(),
+			Version:     version,
+			WorkDir:     localBackend.WorkDir,
+			LogPath:     os.Getenv("MULTICA_WEB_LOG"),
 		}
 		if err := saveLocalWebState(state); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: could not write local web state: %v\n", err)

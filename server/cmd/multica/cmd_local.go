@@ -21,6 +21,11 @@ type localWebState struct {
 	BackendURL  string    `json:"backend_url"`
 	LocalAuth   bool      `json:"local_auth"`
 	PID         int       `json:"pid"`
+	Mode        string    `json:"mode,omitempty"`
+	BinaryPath  string    `json:"binary_path,omitempty"`
+	Version     string    `json:"version,omitempty"`
+	WorkDir     string    `json:"work_dir,omitempty"`
+	LogPath     string    `json:"log_path,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
@@ -117,6 +122,16 @@ func runLocalStatus(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Backend:  %s\n", valueOrDefault(state.BackendURL, "(unknown)"))
 	fmt.Fprintf(cmd.OutOrStdout(), "Auth:     %s\n", map[bool]string{true: "local", false: "normal"}[state.LocalAuth])
 	fmt.Fprintf(cmd.OutOrStdout(), "PID:      %d\n", state.PID)
+	fmt.Fprintf(cmd.OutOrStdout(), "Mode:     %s\n", valueOrDefault(state.Mode, "foreground"))
+	if state.BinaryPath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Binary:   %s\n", state.BinaryPath)
+	}
+	if state.Version != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Version:  %s\n", state.Version)
+	}
+	if state.LogPath != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Logs:     %s\n", state.LogPath)
+	}
 	fmt.Fprintf(cmd.OutOrStdout(), "Updated:  %s\n", state.UpdatedAt.Format(time.RFC3339))
 	return nil
 }
