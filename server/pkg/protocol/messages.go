@@ -20,6 +20,10 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	// DaemonCapabilityLocalSparseWorktreeV1 advertises that worktree mode also
+	// honors resource_ref.sparse_paths. Without this, an older worktree-capable
+	// daemon would json-skip sparse_paths and silently check out the full repo.
+	DaemonCapabilityLocalSparseWorktreeV1 = "local-sparse-worktree-v1"
 
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).

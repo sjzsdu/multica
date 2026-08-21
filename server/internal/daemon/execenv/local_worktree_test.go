@@ -752,3 +752,48 @@ func TestDiscardRemovesWorktreeAndBranch(t *testing.T) {
 		t.Errorf("branch survived Discard, resolves to %s", out)
 	}
 }
+
+func TestPrepareLocalWorktreeSparseCheckout(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "frontend/flow360-ui-next/app.tsx"), "ui original\n")
+	writeFile(t, filepath.Join(repo, "frontend/graphic/uvf/viewer.ts"), "uvf original\n")
+	writeFile(t, filepath.Join(repo, "backend/service.go"), "backend original\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "add monorepo paths")
+
+	writeFile(t, filepath.Join(repo, "frontend/flow360-ui-next/app.tsx"), "ui edited\n")
+	writeFile(t, filepath.Join(repo, "backend/service.go"), "backend edited\n")
+	writeFile(t, filepath.Join(repo, "frontend/graphic/uvf/new.txt"), "new uvf\n")
+	writeFile(t, filepath.Join(repo, "backend/new.txt"), "new backend\n")
+
+	wt, err := PrepareLocalWorktree(LocalWorktreeParams{
+		LocalPath:   repo,
+		EnvRoot:     t.TempDir(),
+		AgentName:   "Scout",
+		TaskID:      "21112222-3333-4444-5555-666677778888",
+		SparsePaths: []string{"frontend/flow360-ui-next", "frontend/graphic/uvf"},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("PrepareLocalWorktree sparse: %v", err)
+	}
+	defer wt.Discard(worktreeTestLogger())
+
+	if got := readFile(t, filepath.Join(wt.Path, "frontend/flow360-ui-next/app.tsx")); got != "ui edited\n" {
+		t.Errorf("sparse tracked edit not replayed: got %q", got)
+	}
+	if got := readFile(t, filepath.Join(wt.Path, "frontend/graphic/uvf/new.txt")); got != "new uvf\n" {
+		t.Errorf("sparse untracked file not copied: got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "backend/service.go")); !os.IsNotExist(err) {
+		t.Fatalf("backend path should not be present in sparse worktree, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "backend/new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("backend untracked file should not be copied, stat err=%v", err)
+	}
+	if !wt.DirtyBaseCaptured {
+		t.Error("DirtyBaseCaptured = false, want true for sparse tracked edit")
+	}
+	if wt.UntrackedCopied != 1 {
+		t.Errorf("UntrackedCopied = %d, want 1", wt.UntrackedCopied)
+	}
+}

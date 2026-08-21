@@ -1385,6 +1385,45 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 	}
 }
 
+func TestValidateLocalDirectoryRefSparsePaths(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"local_path":     "/Users/foo/flex",
+		"daemon_id":      "d1",
+		"execution_mode": "worktree",
+		"sparse_paths":   []string{"frontend/flow360-ui-next/", "frontend/graphic/uvf", "frontend/graphic/uvf"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	out, err := validateLocalDirectoryRef(raw)
+	if err != nil {
+		t.Fatalf("validateLocalDirectoryRef: %v", err)
+	}
+	var got localDirectoryRef
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.Join(got.SparsePaths, ",") != "frontend/flow360-ui-next,frontend/graphic/uvf" {
+		t.Fatalf("SparsePaths = %#v", got.SparsePaths)
+	}
+
+	badCases := []map[string]any{
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "sparse_paths": []string{"frontend/flow360-ui-next"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"/absolute/path"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"../secret"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"frontend/../secret"}},
+	}
+	for _, bad := range badCases {
+		raw, err := json.Marshal(bad)
+		if err != nil {
+			t.Fatalf("marshal bad: %v", err)
+		}
+		if _, err := validateLocalDirectoryRef(raw); err == nil {
+			t.Fatalf("expected sparse_paths validation error for %#v", bad)
+		}
+	}
+}
+
 // latestDaemonCLIVersion feeds the worktree-mode save gate: an old daemon
 // json-skips execution_mode and would run tasks in place, so the gate has to
 // read the version of the binary actually running on the machine — the
