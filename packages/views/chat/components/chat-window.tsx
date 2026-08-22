@@ -162,6 +162,37 @@ export function ChatWindow() {
     ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
     : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const qc = useQueryClient();
+  const previousPendingRef = useRef<{
+    sessionId: string;
+    taskId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!activeSessionId) {
+      previousPendingRef.current = null;
+      return;
+    }
+
+    const previous = previousPendingRef.current;
+    previousPendingRef.current = {
+      sessionId: activeSessionId,
+      taskId: pendingTaskId,
+    };
+    if (
+      previous?.sessionId !== activeSessionId ||
+      !previous.taskId ||
+      previous.taskId === pendingTaskId
+    ) {
+      return;
+    }
+
+    // The pending query has a polling fallback for lifecycle frames missed by
+    // realtime. When that fallback observes completion (or queue promotion),
+    // reconcile the transcript too so the assistant result appears in the same
+    // recovery path instead of merely clearing the spinner.
+    qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
+    qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
+  }, [activeSessionId, pendingTaskId, qc]);
   const stopRequestedBeforeTaskRef = useRef(false);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
   // page controller — the skip/apply/consume/reconcile state machine must not
@@ -210,7 +241,6 @@ export function ChatWindow() {
     setSelectedProjectId(null);
   }, [projectsLoaded, projects, selectedProjectId, setSelectedProjectId]);
 
-  const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
   const setSessionProject = useSetChatSessionProject();
