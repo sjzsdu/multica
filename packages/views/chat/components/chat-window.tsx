@@ -68,6 +68,7 @@ import { hideQueuedChatMessages } from "@multica/core/chat/pending";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
+import { shouldReconcilePendingTaskTransition } from "./pending-task-recovery";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
@@ -178,11 +179,10 @@ export function ChatWindow() {
       sessionId: activeSessionId,
       taskId: pendingTaskId,
     };
-    if (
-      previous?.sessionId !== activeSessionId ||
-      !previous.taskId ||
-      previous.taskId === pendingTaskId
-    ) {
+    if (!shouldReconcilePendingTaskTransition(previous, {
+      sessionId: activeSessionId,
+      taskId: pendingTaskId,
+    })) {
       return;
     }
 
