@@ -86,7 +86,7 @@
     "section_header": "Resources",
     "empty": "No resources attached.",
     "add_button": "Add resource",
-    "popover_title": "Attach a GitHub repo",
+    "popover_title": "Attach a resource",
     "repos_search_placeholder": "Search repositories...",
     "repos_search_empty": "No repositories match your search.",
     "attached_badge": "attached",
@@ -136,7 +136,14 @@
     "mode_badge_worktree_tooltip": "Tasks run at the same time in their own git worktree and hand back a branch. Your working copy is untouched.",
     "toast_local_mode_updated": "Execution mode updated",
     "toast_local_mode_update_failed": "Could not update the execution mode",
-    "mode_badge_in_place": "Direct"
+    "mode_badge_in_place": "Direct",
+    "manual_local_path_label": "Local directory path",
+    "manual_local_path_placeholder": "/Users/you/project",
+    "manual_local_path_hint": "For web, type an absolute path on the machine running the daemon. The daemon validates it when tasks run.",
+    "sparse_paths_label": "Sparse checkout paths",
+    "sparse_paths_placeholder": "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    "sparse_paths_hint": "Optional. One repository-relative path per line. Only used in parallel worktree mode.",
+    "sparse_badge": "Sparse"
   },
   "delete_dialog": {
     "title": "Delete project",

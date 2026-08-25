@@ -85,7 +85,7 @@
     "section_header": "리소스",
     "empty": "첨부된 리소스가 없습니다.",
     "add_button": "리소스 추가",
-    "popover_title": "GitHub 저장소 연결",
+    "popover_title": "리소스 연결",
     "repos_search_placeholder": "저장소 검색...",
     "repos_search_empty": "검색 결과와 일치하는 저장소가 없습니다.",
     "attached_badge": "연결됨",
@@ -135,7 +135,14 @@
     "mode_badge_worktree_tooltip": "작업이 각자의 git 워크트리에서 동시에 실행되고 브랜치로 결과를 돌려줍니다. 작업 사본은 변경되지 않습니다.",
     "toast_local_mode_updated": "실행 모드를 업데이트했습니다",
     "toast_local_mode_update_failed": "실행 모드를 업데이트하지 못했습니다",
-    "mode_badge_in_place": "직접"
+    "mode_badge_in_place": "직접",
+    "manual_local_path_label": "로컬 디렉터리 경로",
+    "manual_local_path_placeholder": "/Users/you/project",
+    "manual_local_path_hint": "웹에서는 daemon이 실행 중인 머신의 절대 경로를 입력합니다. daemon이 작업 실행 시 검증합니다.",
+    "sparse_paths_label": "스파스 체크아웃 경로",
+    "sparse_paths_placeholder": "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    "sparse_paths_hint": "선택 사항입니다. 저장소 상대 경로를 한 줄에 하나씩 입력합니다. 병렬 worktree 모드에서만 사용됩니다.",
+    "sparse_badge": "Sparse"
   },
   "delete_dialog": {
     "title": "프로젝트 삭제",
