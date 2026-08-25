@@ -15,6 +15,7 @@
 | `05-shared-frontend-platform.md` | Web/Desktop 如何共享业务页面但隔离平台能力 | `packages/core/platform/*`、`packages/views/navigation/*`、`apps/web/platform/*`、`apps/desktop/src/renderer/src/*` |
 | `06-automation-integrations.md` | Autopilot、plugin、channel 为什么是平台扩展骨架 | `server/internal/service/autopilot.go`、`plugin*.go`、`server/cmd/server/router.go`、`server/migrations/*` |
 | `07-interfaces-and-structs.md` | 从接口和关键结构体入手梳理系统契约 | `server/internal/service/*`、`server/internal/daemon/*`、`server/internal/integrations/channel/*`、`packages/core/types/*`、`packages/views/navigation/*` |
+| `08-custom-runtime-profiles.md` | 如何用 custom runtime profile 接入 jcode、picoclaw 这类本机 CLI | `server/cmd/multica/cmd_runtime_profile.go`、`server/internal/daemon/*`、`server/pkg/agent/agent.go`、`packages/core/types/agent.ts` |
 
 ## 一张总图
 
