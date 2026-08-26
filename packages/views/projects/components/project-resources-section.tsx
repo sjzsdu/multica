@@ -22,6 +22,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
+  AgentRuntime,
   GithubRepoResourceRef,
   LocalDirectoryExecutionMode,
   LocalDirectoryResourceRef,
@@ -89,6 +90,20 @@ function executionModeOf(
   return ref.execution_mode === "worktree" ? "worktree" : "in_place";
 }
 
+function inferSingleOnlineLocalDaemonId(runtimes: readonly AgentRuntime[]): string | null {
+  const daemonIds = new Set<string>();
+  for (const runtime of runtimes) {
+    if (
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id
+    ) {
+      daemonIds.add(runtime.daemon_id);
+    }
+  }
+  return daemonIds.size === 1 ? [...daemonIds][0] ?? null : null;
+}
+
 /** Pending mode edit — either for a directory being added, or an existing row. */
 type ModeDialogState = {
   path: string;
@@ -130,7 +145,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // read-only on web because the daemon-id check can't be performed in the
   // browser.
   const desktopMode = isDesktopShell();
-  const localDaemonId = daemonStatus.daemonId;
 
   // Only ever used to decide what to PRESELECT. Whether the machine can run
   // worktree mode is the server's call — it knows its own version, the client
@@ -138,6 +152,17 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // what told a user on the newest release to upgrade it (#7113). The save is
   // gated server-side and surfaced here as an inline error instead.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // Web has no Electron preload (`window.daemonAPI`), so the shared hook cannot
+  // read the local daemon id directly. In local web mode the backend already has
+  // the daemon registered as normal runtimes; when the signed-in user has exactly
+  // one online local daemon in this workspace, treat that as this browser's
+  // local daemon so manual local-directory resources can be created from web.
+  const { data: myRuntimes = [] } = useQuery(runtimeListOptions(wsId, "me"));
+  const inferredWebDaemonId = desktopMode
+    ? null
+    : inferSingleOnlineLocalDaemonId(myRuntimes);
+  const localDaemonId = daemonStatus.daemonId ?? inferredWebDaemonId;
+  const localDaemonRunning = daemonStatus.running || inferredWebDaemonId !== null;
   // The one thing the client must still check up front: whether this server
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
@@ -269,7 +294,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const handleAttachManualLocalDirectory = () => {
     const path = manualLocalPath.trim();
     if (!path) return;
-    if (!localDaemonId || !daemonStatus.running) {
+    if (!localDaemonId || !localDaemonRunning) {
       toast.error(t(($) => $.resources.toast_local_daemon_not_running));
       return;
     }
@@ -537,7 +562,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   setAddOpen(false);
                 }}
               />
-              {daemonStatus.running && localDaemonId && !hasLocalDirectoryForCurrentDaemon && (
+              {localDaemonRunning && localDaemonId && !hasLocalDirectoryForCurrentDaemon && (
                 <ManualLocalDirectoryForm
                   value={manualLocalPath}
                   onChange={setManualLocalPath}
