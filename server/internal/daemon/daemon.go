@@ -7210,6 +7210,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if reused {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
+	if env.LocalWorktree != nil && localAssignment != nil {
+		taskCtx.ProjectResources = execenv.RewriteLocalDirectoryResourcesForWorktree(
+			taskCtx.ProjectResources, localAssignment.AbsPath, env.WorkDir)
+	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)

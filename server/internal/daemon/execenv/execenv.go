@@ -488,6 +488,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			localWorktree.Discard(logger)
 		}()
 		workDir = localWorktree.WorkDir
+		params.Task.ProjectResources = RewriteLocalDirectoryResourcesForWorktree(
+			params.Task.ProjectResources, wtParams.LocalPath, workDir)
 		// The resource may point at a subdirectory that holds only ignored
 		// files, in which case git doesn't materialise it in the worktree.
 		if err := os.MkdirAll(workDir, 0o755); err != nil {

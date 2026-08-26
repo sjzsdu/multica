@@ -1,12 +1,14 @@
 package execenv
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -435,6 +437,62 @@ func TestWorktreeModeDeliversBranchWithoutSidecars(t *testing.T) {
 	// nothing the agent or the runtime produced.
 	if got := gitRun(t, repo, "status", "--porcelain"); got != "M tracked.txt" {
 		t.Errorf("user's working tree changed, want only their own edit:\n%s", got)
+	}
+}
+
+func TestWorktreeModeProjectResourcesPointAtTaskWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: filepath.Join(t.TempDir(), "workspaces"),
+		WorkspaceID:    "ws-1",
+		TaskID:         "11112222-3333-4444-5555-666677778888",
+		AgentName:      "J",
+		Provider:       "claude",
+		LocalWorktree:  &LocalWorktreeParams{LocalPath: repo},
+		Task: TaskContextForEnv{
+			ProjectID:    "project-1",
+			ProjectTitle: "Project",
+			IssueID:      "issue-1",
+			AgentName:    "J",
+			ProjectResources: []ProjectResourceForEnv{
+				{
+					ID:           "resource-1",
+					ResourceType: "local_directory",
+					ResourceRef:  json.RawMessage(`{"local_path":` + strconv.Quote(repo) + `,"daemon_id":"daemon-1","execution_mode":"worktree"}`),
+					Label:        "repo",
+				},
+			},
+		},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	t.Cleanup(func() { finalizeOK(t, env.LocalWorktree) })
+
+	data, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "project", "resources.json"))
+	if err != nil {
+		t.Fatalf("read resources.json: %v", err)
+	}
+	var payload struct {
+		Resources []struct {
+			ResourceRef map[string]string `json:"resource_ref"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("parse resources.json: %v", err)
+	}
+	if len(payload.Resources) != 1 {
+		t.Fatalf("resources length = %d, want 1", len(payload.Resources))
+	}
+	ref := payload.Resources[0].ResourceRef
+	if got := ref["local_path"]; got != env.WorkDir {
+		t.Fatalf("local_path = %q, want task worktree %q; original checkout must not be agent-facing", got, env.WorkDir)
+	}
+	if got := ref["worktree_path"]; got != env.WorkDir {
+		t.Fatalf("worktree_path = %q, want %q", got, env.WorkDir)
+	}
+	if strings.Contains(string(data), repo) {
+		t.Fatalf("resources.json still exposes original checkout %q:\n%s", repo, data)
 	}
 }
 

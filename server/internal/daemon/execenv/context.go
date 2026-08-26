@@ -256,6 +256,43 @@ type projectResourceFile struct {
 	Resources          []ProjectResourceForEnv `json:"resources"`
 }
 
+// RewriteLocalDirectoryResourcesForWorktree returns an agent-facing copy of the
+// project resources for local_directory worktree mode. The persisted resource
+// must keep the user's configured local_path so future tasks can prepare their
+// worktree from it. During a run, however, local_path must name the task-local
+// worktree workdir so the brief and resources.json cannot point the agent back
+// at the user's original checkout.
+func RewriteLocalDirectoryResourcesForWorktree(resources []ProjectResourceForEnv, configuredPath, workDir string) []ProjectResourceForEnv {
+	if len(resources) == 0 || strings.TrimSpace(workDir) == "" {
+		return resources
+	}
+	configuredPath = strings.TrimSpace(configuredPath)
+	out := make([]ProjectResourceForEnv, len(resources))
+	copy(out, resources)
+	for i, resource := range out {
+		if resource.ResourceType != "local_directory" || len(resource.ResourceRef) == 0 {
+			continue
+		}
+		var ref map[string]any
+		if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+			continue
+		}
+		localPath, _ := ref["local_path"].(string)
+		if configuredPath != "" && strings.TrimSpace(localPath) != configuredPath {
+			continue
+		}
+		ref["local_path"] = workDir
+		ref["worktree_path"] = workDir
+		ref["execution_mode"] = "worktree"
+		data, err := json.Marshal(ref)
+		if err != nil {
+			continue
+		}
+		out[i].ResourceRef = data
+	}
+	return out
+}
+
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64
 // blob. The struct's other fields are simple strings.
 func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
