@@ -509,7 +509,11 @@ func (w *LocalWorktree) commitAll(logger *slog.Logger) (bool, error) {
 // commit" case and (false, err) for a real failure — the distinction callers
 // need to decide whether the tree is safe to discard.
 func commitEverything(worktreePath, message string) (bool, error) {
-	if out, err := runGit(worktreePath, "add", "-A"); err != nil {
+	// --sparse is harmless for normal worktrees and required for sparse ones when
+	// hooks or checkout filters touch tracked paths outside the sparse cone. Without
+	// it Git refuses the add with advice.updateSparsePath, which makes a perfectly
+	// valid sparse local-directory task fail before the agent starts.
+	if out, err := runGit(worktreePath, "add", "--sparse", "-A"); err != nil {
 		return false, fmt.Errorf("git add: %s: %w", strings.TrimSpace(out), err)
 	}
 	// --no-verify: the user's commit hooks are written for the user's own
