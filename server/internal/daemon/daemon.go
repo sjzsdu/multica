@@ -7067,7 +7067,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
-			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath, SparsePaths: localAssignment.Ref.SparsePaths}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -7317,6 +7317,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// conversation Codex will silently restart from scratch.
 	if reused {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	}
+	if env.LocalWorktree != nil && localAssignment != nil {
+		taskCtx.ProjectResources = execenv.RewriteLocalDirectoryResourcesForWorktree(
+			taskCtx.ProjectResources, localAssignment.AbsPath, env.WorkDir)
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.

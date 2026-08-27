@@ -85,7 +85,7 @@
     "section_header": "资源",
     "empty": "还没有关联资源。",
     "add_button": "添加资源",
-    "popover_title": "关联 GitHub 仓库",
+    "popover_title": "关联资源",
     "repos_search_placeholder": "搜索仓库...",
     "repos_search_empty": "没有匹配的仓库。",
     "attached_badge": "已关联",
@@ -135,7 +135,14 @@
     "mode_badge_worktree_tooltip": "任务在各自的 git worktree 中同时运行，并以分支形式交付结果。你的工作区不会被改动。",
     "toast_local_mode_updated": "已更新执行方式",
     "toast_local_mode_update_failed": "无法更新执行方式",
-    "mode_badge_in_place": "原地"
+    "mode_badge_in_place": "原地",
+    "manual_local_path_label": "本地目录路径",
+    "manual_local_path_placeholder": "/Users/you/project",
+    "manual_local_path_hint": "Web 上请输入运行 daemon 那台机器上的绝对路径。daemon 会在任务运行时校验。",
+    "sparse_paths_label": "稀疏检出路径",
+    "sparse_paths_placeholder": "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    "sparse_paths_hint": "可选。每行一个仓库内相对路径，仅在并行 worktree 模式下生效。",
+    "sparse_badge": "稀疏"
   },
   "delete_dialog": {
     "title": "删除项目",

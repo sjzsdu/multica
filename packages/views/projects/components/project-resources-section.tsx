@@ -22,6 +22,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
+  AgentRuntime,
   GithubRepoResourceRef,
   LocalDirectoryExecutionMode,
   LocalDirectoryResourceRef,
@@ -89,11 +90,27 @@ function executionModeOf(
   return ref.execution_mode === "worktree" ? "worktree" : "in_place";
 }
 
+function inferSingleOnlineLocalDaemonId(runtimes: readonly AgentRuntime[]): string | null {
+  const daemonIds = new Set<string>();
+  for (const runtime of runtimes) {
+    if (
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id
+    ) {
+      daemonIds.add(runtime.daemon_id);
+    }
+  }
+  return daemonIds.size === 1 ? [...daemonIds][0] ?? null : null;
+}
+
 /** Pending mode edit — either for a directory being added, or an existing row. */
 type ModeDialogState = {
   path: string;
   daemonId: string | null;
   mode: LocalDirectoryExecutionMode;
+  /** Newline-separated sparse checkout paths shown in the mode dialog. */
+  sparsePaths?: string;
   /** undefined = unknown (older desktop build); treated as "cannot verify". */
   isGitRepo: boolean | undefined;
   /** Set for an edit; absent when adding a new resource. */
@@ -110,6 +127,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const [open, setOpen] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
+  const [manualLocalPath, setManualLocalPath] = useState("");
   const [picking, setPicking] = useState(false);
   const [modeDialog, setModeDialog] = useState<ModeDialogState | null>(null);
   const [modeSaving, setModeSaving] = useState(false);
@@ -127,7 +145,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // read-only on web because the daemon-id check can't be performed in the
   // browser.
   const desktopMode = isDesktopShell();
-  const localDaemonId = daemonStatus.daemonId;
 
   // Only ever used to decide what to PRESELECT. Whether the machine can run
   // worktree mode is the server's call — it knows its own version, the client
@@ -135,6 +152,17 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // what told a user on the newest release to upgrade it (#7113). The save is
   // gated server-side and surfaced here as an inline error instead.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // Web has no Electron preload (`window.daemonAPI`), so the shared hook cannot
+  // read the local daemon id directly. In local web mode the backend already has
+  // the daemon registered as normal runtimes; when the signed-in user has exactly
+  // one online local daemon in this workspace, treat that as this browser's
+  // local daemon so manual local-directory resources can be created from web.
+  const { data: myRuntimes = [] } = useQuery(runtimeListOptions(wsId, "me"));
+  const inferredWebDaemonId = desktopMode
+    ? null
+    : inferSingleOnlineLocalDaemonId(myRuntimes);
+  const localDaemonId = daemonStatus.daemonId ?? inferredWebDaemonId;
+  const localDaemonRunning = daemonStatus.running || inferredWebDaemonId !== null;
   // The one thing the client must still check up front: whether this server
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
@@ -263,14 +291,54 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     }
   };
 
-  const handleConfirmMode = async (mode: LocalDirectoryExecutionMode) => {
+  const handleAttachManualLocalDirectory = () => {
+    const path = manualLocalPath.trim();
+    if (!path) return;
+    if (!localDaemonId || !localDaemonRunning) {
+      toast.error(t(($) => $.resources.toast_local_daemon_not_running));
+      return;
+    }
+    if (!isAbsolutePathLike(path)) {
+      toast.error(t(($) => $.resources.local_validate_not_absolute));
+      return;
+    }
+    if (attachedLocalPaths.size > 0) {
+      toast.error(t(($) => $.resources.toast_local_daemon_already_attached));
+      return;
+    }
+    setModeError(null);
+    setModeDialog({
+      path,
+      daemonId: localDaemonId,
+      mode:
+        serverValidatesWorktree && advertisesWorktree(localDaemonId)
+          ? "worktree"
+          : "in_place",
+      // The browser cannot inspect the filesystem. The server and daemon validate
+      // at save/task time, so keep worktree selectable unless the server itself is
+      // too old to understand the mode.
+      isGitRepo: undefined,
+      label: lastPathPart(path),
+      sparsePaths: "",
+    });
+    setAddOpen(false);
+  };
+
+  const handleConfirmMode = async (
+    mode: LocalDirectoryExecutionMode,
+    sparsePathsText = "",
+  ) => {
     if (!modeDialog || modeSaving) return;
     setModeSaving(true);
     setModeError(null);
+    const sparsePaths = mode === "worktree" ? parseSparsePathsText(sparsePathsText) : [];
     try {
       if (modeDialog.resource) {
         const ref = modeDialog.resource.resource_ref;
-        if (executionModeOf(ref) === mode) {
+        if (
+          executionModeOf(ref) === mode &&
+          sameStringArray(ref.sparse_paths ?? [], sparsePaths)
+        ) {
           setModeDialog(null);
           return;
         }
@@ -279,7 +347,11 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           data: {
             // Spread first so every other ref field survives the edit — the
             // server replaces the whole ref, it does not deep-merge.
-            resource_ref: { ...ref, execution_mode: mode },
+            resource_ref: {
+              ...ref,
+              execution_mode: mode,
+              sparse_paths: sparsePaths.length > 0 ? sparsePaths : undefined,
+            },
           },
         });
         toast.success(t(($) => $.resources.toast_local_mode_updated));
@@ -292,6 +364,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
             daemon_id: localDaemonId,
             label: modeDialog.label ?? modeDialog.path,
             execution_mode: mode,
+            sparse_paths: sparsePaths.length > 0 ? sparsePaths : undefined,
           },
         });
         toast.success(t(($) => $.resources.toast_local_attached));
@@ -390,6 +463,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                       path: target.resource_ref.local_path,
                       daemonId: target.resource_ref.daemon_id,
                       mode: executionModeOf(target.resource_ref),
+                      sparsePaths: (target.resource_ref.sparse_paths ?? []).join("\n"),
                       // The path is already saved, so there is nothing to
                       // re-validate from the browser; the desktop check only
                       // runs at pick time. Unknown means the option stays
@@ -488,6 +562,14 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   setAddOpen(false);
                 }}
               />
+              {localDaemonRunning && localDaemonId && !hasLocalDirectoryForCurrentDaemon && (
+                <ManualLocalDirectoryForm
+                  value={manualLocalPath}
+                  onChange={setManualLocalPath}
+                  onSubmit={handleAttachManualLocalDirectory}
+                  disabled={createResource.isPending}
+                />
+              )}
             </PopoverContent>
           </Popover>
           {desktopMode && (
@@ -534,6 +616,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           }}
           path={modeDialog.path}
           value={modeDialog.mode}
+          sparsePaths={modeDialog.sparsePaths}
           unavailableReason={worktreeUnavailableReason(
             modeDialog.isGitRepo,
             serverValidatesWorktree,
@@ -545,7 +628,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               ? t(($) => $.resources.mode_save)
               : t(($) => $.resources.mode_add)
           }
-          onConfirm={(mode) => void handleConfirmMode(mode)}
+          onConfirm={(mode, sparsePaths) => void handleConfirmMode(mode, sparsePaths)}
         />
       )}
     </div>
@@ -778,6 +861,20 @@ function LocalDirectoryRow({
           </TooltipContent>
         </Tooltip>
       )}
+      {mode === "worktree" && !editing && (ref.sparse_paths?.length ?? 0) > 0 && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge variant="outline" className="shrink-0 font-normal">
+                {t(($) => $.resources.sparse_badge)}
+              </Badge>
+            }
+          />
+          <TooltipContent side="top" className="whitespace-pre-line">
+            {ref.sparse_paths?.join("\n")}
+          </TooltipContent>
+        </Tooltip>
+      )}
       {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
           it works from the web app or another device, unlike rename (whose
           label belongs to the owning machine) or the folder picker. */}
@@ -853,6 +950,84 @@ function CustomRepoForm({
       </Button>
     </form>
   );
+}
+
+function ManualLocalDirectoryForm({
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  disabled?: boolean;
+}) {
+  const { t } = useT("projects");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit();
+      }}
+      className="space-y-1 border-t pt-2"
+    >
+      <label
+        className="text-micro font-medium text-muted-foreground"
+        htmlFor="manual-local-directory-path"
+      >
+        {t(($) => $.resources.manual_local_path_label)}
+      </label>
+      <div className="flex items-center gap-1.5">
+        <input
+          id="manual-local-directory-path"
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t(($) => $.resources.manual_local_path_placeholder)}
+          className="min-w-0 flex-1 rounded-md border bg-transparent px-2 py-1 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-caption"
+          disabled={disabled || !value.trim()}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
+      <p className="text-micro text-muted-foreground">
+        {t(($) => $.resources.manual_local_path_hint)}
+      </p>
+    </form>
+  );
+}
+
+function parseSparsePathsText(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\n,]+/)) {
+    const path = raw.trim().replace(/^\/+|\/+$/g, "");
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function isAbsolutePathLike(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function lastPathPart(path: string): string {
+  const normalized = path.replace(/[\\/]+$/g, "");
+  const parts = normalized.split(/[\\/]+/);
+  return parts[parts.length - 1] || path;
 }
 
 function localValidationMessage(

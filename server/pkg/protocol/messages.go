@@ -20,10 +20,17 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+<<<<<<< HEAD
 	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
 	// two-section quick-create prompt that keeps a new instruction separate
 	// from immutable historical source context.
 	DaemonCapabilitySourceContextQuickCreateV1 = "source_context_quick_create_v1"
+=======
+	// DaemonCapabilityLocalSparseWorktreeV1 advertises that worktree mode also
+	// honors resource_ref.sparse_paths. Without this, an older worktree-capable
+	// daemon would json-skip sparse_paths and silently check out the full repo.
+	DaemonCapabilityLocalSparseWorktreeV1 = "local-sparse-worktree-v1"
+>>>>>>> 5a456c900 (feat: web daemon and gitpath)
 
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).

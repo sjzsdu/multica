@@ -74,6 +74,9 @@ type LocalWorktreeParams struct {
 	// AgentName and TaskID name the branch: agent/<name>/<short-task-id>.
 	AgentName string
 	TaskID    string
+	// SparsePaths optionally limits the task worktree to repo-relative paths via
+	// git sparse-checkout. Empty means a full worktree.
+	SparsePaths []string
 }
 
 // LocalWorktree is a prepared worktree plus everything the daemon needs to
@@ -215,7 +218,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	branch := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), taskKey(params.TaskID))
-	actualBranch, err := addLocalWorktree(gitRoot, worktreePath, branch, headSHA)
+	sparsePaths := normalizeWorktreeSparsePaths(params.SparsePaths)
+	actualBranch, err := addLocalWorktree(gitRoot, worktreePath, branch, headSHA, sparsePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +240,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// A half-replayed tree is the worst outcome available: it looks like a
 	// working checkout, so nothing downstream questions it, while the agent
 	// silently reads different code than the user has.
-	if stashSHA != "" {
+	if stashSHA != "" && len(sparsePaths) == 0 {
 		if out, applyErr := runGit(worktreePath, "stash", "apply", stashSHA); applyErr != nil {
 			removeLocalWorktreeDir(gitRoot, worktreePath, logger)
 			deleteBranch(gitRoot, actualBranch, logger)
@@ -246,8 +250,17 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		}
 		wt.DirtyBaseCaptured = true
 	}
+	if len(sparsePaths) > 0 {
+		replayed, replayErr := replaySparseTrackedChanges(gitRoot, worktreePath, sparsePaths)
+		if replayErr != nil {
+			removeLocalWorktreeDir(gitRoot, worktreePath, logger)
+			deleteBranch(gitRoot, actualBranch, logger)
+			return nil, fmt.Errorf("execenv: could not replay sparse tracked changes from %q into the task worktree: %w", gitRoot, replayErr)
+		}
+		wt.DirtyBaseCaptured = replayed
+	}
 
-	copied, skipped, err := copyUntrackedFiles(gitRoot, worktreePath, logger)
+	copied, skipped, err := copyUntrackedFilesForPaths(gitRoot, worktreePath, sparsePaths, logger)
 	if err != nil {
 		removeLocalWorktreeDir(gitRoot, worktreePath, logger)
 		deleteBranch(gitRoot, actualBranch, logger)
@@ -496,7 +509,11 @@ func (w *LocalWorktree) commitAll(logger *slog.Logger) (bool, error) {
 // commit" case and (false, err) for a real failure — the distinction callers
 // need to decide whether the tree is safe to discard.
 func commitEverything(worktreePath, message string) (bool, error) {
-	if out, err := runGit(worktreePath, "add", "-A"); err != nil {
+	// --sparse is harmless for normal worktrees and required for sparse ones when
+	// hooks or checkout filters touch tracked paths outside the sparse cone. Without
+	// it Git refuses the add with advice.updateSparsePath, which makes a perfectly
+	// valid sparse local-directory task fail before the agent starts.
+	if out, err := runGit(worktreePath, "add", "--sparse", "-A"); err != nil {
 		return false, fmt.Errorf("git add: %s: %w", strings.TrimSpace(out), err)
 	}
 	// --no-verify: the user's commit hooks are written for the user's own
@@ -678,16 +695,92 @@ func indexLockHint(gitRoot string) string {
 // addLocalWorktree creates the worktree, retrying once under a suffixed branch
 // name when the branch already exists (a re-dispatched task keeps its id, so
 // its branch can survive from the previous run).
-func addLocalWorktree(gitRoot, worktreePath, branch, baseRef string) (string, error) {
-	out, err := runGit(gitRoot, "worktree", "add", "-b", branch, worktreePath, baseRef)
+func addLocalWorktree(gitRoot, worktreePath, branch, baseRef string, sparsePaths []string) (string, error) {
+	args := []string{"worktree", "add"}
+	if len(sparsePaths) > 0 {
+		args = append(args, "--no-checkout")
+	}
+	args = append(args, "-b", branch, worktreePath, baseRef)
+	out, err := runGit(gitRoot, args...)
 	if err != nil && strings.Contains(strings.ToLower(out), "already exists") {
 		branch = fmt.Sprintf("%s-%d", branch, time.Now().Unix())
-		out, err = runGit(gitRoot, "worktree", "add", "-b", branch, worktreePath, baseRef)
+		args[len(args)-3] = branch
+		out, err = runGit(gitRoot, args...)
 	}
 	if err != nil {
 		return "", fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 	}
+	if len(sparsePaths) > 0 {
+		if err := configureSparseCheckout(worktreePath, sparsePaths); err != nil {
+			return "", err
+		}
+	}
 	return branch, nil
+}
+
+func configureSparseCheckout(worktreePath string, sparsePaths []string) error {
+	if out, err := runGit(worktreePath, "sparse-checkout", "init", "--cone"); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout init: %s: %w", strings.TrimSpace(out), err)
+	}
+	args := append([]string{"sparse-checkout", "set"}, sparsePaths...)
+	if out, err := runGit(worktreePath, args...); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout set: %s: %w", strings.TrimSpace(out), err)
+	}
+	if out, err := runGit(worktreePath, "checkout", "--force", "HEAD"); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout checkout: %s: %w", strings.TrimSpace(out), err)
+	}
+	return nil
+}
+
+func normalizeWorktreeSparsePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		p := filepath.ToSlash(strings.TrimSpace(raw))
+		p = strings.Trim(p, "/")
+		if p == "" || p == "." {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+func replaySparseTrackedChanges(gitRoot, worktreePath string, sparsePaths []string) (bool, error) {
+	replayed := false
+	for _, args := range [][]string{
+		append([]string{"diff", "--cached", "--binary", "--"}, sparsePaths...),
+		append([]string{"diff", "--binary", "--"}, sparsePaths...),
+	} {
+		patch, err := runGitStdout(gitRoot, args...)
+		if err != nil {
+			return false, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		}
+		if strings.TrimSpace(patch) == "" {
+			continue
+		}
+		cmd := exec.Command("git", "-C", worktreePath, "apply", "--whitespace=nowarn")
+		cmd.Stdin = strings.NewReader(patch)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return false, fmt.Errorf("git apply: %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		replayed = true
+	}
+	return replayed, nil
+}
+
+func copyUntrackedFilesForPaths(gitRoot, worktreePath string, sparsePaths []string, logger *slog.Logger) (copied, skipped int, err error) {
+	if len(sparsePaths) == 0 {
+		return copyUntrackedFiles(gitRoot, worktreePath, logger)
+	}
+	return copyUntrackedFiles(gitRoot, worktreePath, logger, sparsePaths...)
 }
 
 // copyUntrackedFiles replays the user's untracked-but-not-ignored files into
@@ -695,13 +788,18 @@ func addLocalWorktree(gitRoot, worktreePath, branch, baseRef string) (string, er
 // without this a brand-new file the user just created would be invisible to the
 // agent. Bounded by maxUntrackedFiles / maxUntrackedBytes; the number skipped
 // is returned so the caller can tell the user instead of quietly under-copying.
-func copyUntrackedFiles(gitRoot, worktreePath string, logger *slog.Logger) (copied, skipped int, err error) {
+func copyUntrackedFiles(gitRoot, worktreePath string, logger *slog.Logger, pathspecs ...string) (copied, skipped int, err error) {
 	// stdout only: a warning on stderr would otherwise be split apart and
 	// treated as file paths to copy. Raw, not trimmed: with -z the entries are
 	// exact filenames, and a file whose name begins or ends with whitespace
 	// would be trim-corrupted into a path that fails to stat and silently
 	// vanishes from the replay.
-	out, err := runGitStdout(gitRoot, "ls-files", "--others", "--exclude-standard", "-z")
+	args := []string{"ls-files", "--others", "--exclude-standard", "-z"}
+	if len(pathspecs) > 0 {
+		args = append(args, "--")
+		args = append(args, pathspecs...)
+	}
+	out, err := runGitStdout(gitRoot, args...)
 	if err != nil {
 		return 0, 0, fmt.Errorf("git ls-files: %w", err)
 	}

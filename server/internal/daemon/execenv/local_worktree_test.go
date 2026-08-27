@@ -1,12 +1,14 @@
 package execenv
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -438,6 +440,62 @@ func TestWorktreeModeDeliversBranchWithoutSidecars(t *testing.T) {
 	}
 }
 
+func TestWorktreeModeProjectResourcesPointAtTaskWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: filepath.Join(t.TempDir(), "workspaces"),
+		WorkspaceID:    "ws-1",
+		TaskID:         "11112222-3333-4444-5555-666677778888",
+		AgentName:      "J",
+		Provider:       "claude",
+		LocalWorktree:  &LocalWorktreeParams{LocalPath: repo},
+		Task: TaskContextForEnv{
+			ProjectID:    "project-1",
+			ProjectTitle: "Project",
+			IssueID:      "issue-1",
+			AgentName:    "J",
+			ProjectResources: []ProjectResourceForEnv{
+				{
+					ID:           "resource-1",
+					ResourceType: "local_directory",
+					ResourceRef:  json.RawMessage(`{"local_path":` + strconv.Quote(repo) + `,"daemon_id":"daemon-1","execution_mode":"worktree"}`),
+					Label:        "repo",
+				},
+			},
+		},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	t.Cleanup(func() { finalizeOK(t, env.LocalWorktree) })
+
+	data, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "project", "resources.json"))
+	if err != nil {
+		t.Fatalf("read resources.json: %v", err)
+	}
+	var payload struct {
+		Resources []struct {
+			ResourceRef map[string]string `json:"resource_ref"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("parse resources.json: %v", err)
+	}
+	if len(payload.Resources) != 1 {
+		t.Fatalf("resources length = %d, want 1", len(payload.Resources))
+	}
+	ref := payload.Resources[0].ResourceRef
+	if got := ref["local_path"]; got != env.WorkDir {
+		t.Fatalf("local_path = %q, want task worktree %q; original checkout must not be agent-facing", got, env.WorkDir)
+	}
+	if got := ref["worktree_path"]; got != env.WorkDir {
+		t.Fatalf("worktree_path = %q, want %q", got, env.WorkDir)
+	}
+	if strings.Contains(string(data), repo) {
+		t.Fatalf("resources.json still exposes original checkout %q:\n%s", repo, data)
+	}
+}
+
 // A crashed daemon leaves a registration pointing at an env root that GC later
 // deletes. The next task on the same repo must clean that up rather than
 // accumulating dead entries in the user's `git worktree list` forever.
@@ -750,5 +808,50 @@ func TestDiscardRemovesWorktreeAndBranch(t *testing.T) {
 	}
 	if out, err := gitTry(t, repo, "rev-parse", "--verify", wt.Branch); err == nil {
 		t.Errorf("branch survived Discard, resolves to %s", out)
+	}
+}
+
+func TestPrepareLocalWorktreeSparseCheckout(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, "frontend/flow360-ui-next/app.tsx"), "ui original\n")
+	writeFile(t, filepath.Join(repo, "frontend/graphic/uvf/viewer.ts"), "uvf original\n")
+	writeFile(t, filepath.Join(repo, "backend/service.go"), "backend original\n")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "add monorepo paths")
+
+	writeFile(t, filepath.Join(repo, "frontend/flow360-ui-next/app.tsx"), "ui edited\n")
+	writeFile(t, filepath.Join(repo, "backend/service.go"), "backend edited\n")
+	writeFile(t, filepath.Join(repo, "frontend/graphic/uvf/new.txt"), "new uvf\n")
+	writeFile(t, filepath.Join(repo, "backend/new.txt"), "new backend\n")
+
+	wt, err := PrepareLocalWorktree(LocalWorktreeParams{
+		LocalPath:   repo,
+		EnvRoot:     t.TempDir(),
+		AgentName:   "Scout",
+		TaskID:      "21112222-3333-4444-5555-666677778888",
+		SparsePaths: []string{"frontend/flow360-ui-next", "frontend/graphic/uvf"},
+	}, worktreeTestLogger())
+	if err != nil {
+		t.Fatalf("PrepareLocalWorktree sparse: %v", err)
+	}
+	defer wt.Discard(worktreeTestLogger())
+
+	if got := readFile(t, filepath.Join(wt.Path, "frontend/flow360-ui-next/app.tsx")); got != "ui edited\n" {
+		t.Errorf("sparse tracked edit not replayed: got %q", got)
+	}
+	if got := readFile(t, filepath.Join(wt.Path, "frontend/graphic/uvf/new.txt")); got != "new uvf\n" {
+		t.Errorf("sparse untracked file not copied: got %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "backend/service.go")); !os.IsNotExist(err) {
+		t.Fatalf("backend path should not be present in sparse worktree, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Path, "backend/new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("backend untracked file should not be copied, stat err=%v", err)
+	}
+	if !wt.DirtyBaseCaptured {
+		t.Error("DirtyBaseCaptured = false, want true for sparse tracked edit")
+	}
+	if wt.UntrackedCopied != 1 {
+		t.Errorf("UntrackedCopied = %d, want 1", wt.UntrackedCopied)
 	}
 }

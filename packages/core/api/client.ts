@@ -776,6 +776,10 @@ export class ApiClient {
     });
   }
 
+  async localLogin(): Promise<LoginResponse> {
+    return this.fetch("/auth/local", { method: "POST" });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }

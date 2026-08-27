@@ -46,6 +46,8 @@ server/tmp/
 server/migrate
 server/daemon
 server/multica
+server/cmd/multica/web_dist/*
+!server/cmd/multica/web_dist/README.txt
 
 # Test artifacts
 test-results/
@@ -78,3 +80,7 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+
+# Local AI/config state
+.tt/
+ai-docs

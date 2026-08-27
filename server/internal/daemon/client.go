@@ -194,7 +194,11 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityAgentSkillV1,
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
+<<<<<<< HEAD
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
+=======
+		protocol.DaemonCapabilityLocalSparseWorktreeV1,
+>>>>>>> 5a456c900 (feat: web daemon and gitpath)
 		protocol.DaemonCapabilityRPCV1,
 	}, ",")
 }

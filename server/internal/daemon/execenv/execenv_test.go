@@ -983,6 +983,37 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	}
 }
 
+func TestRewriteLocalDirectoryResourcesForWorktreeHidesOriginalPathInBrief(t *testing.T) {
+	t.Parallel()
+	originalPath := "/Users/dev/project"
+	worktreePath := "/Users/dev/.multica/workspaces/ws/task/worktree"
+	resources := []ProjectResourceForEnv{
+		{
+			ID:           "resource-1",
+			ResourceType: "local_directory",
+			ResourceRef:  json.RawMessage(`{"local_path":"/Users/dev/project","daemon_id":"daemon-1","execution_mode":"worktree"}`),
+			Label:        "project",
+		},
+	}
+
+	rewritten := RewriteLocalDirectoryResourcesForWorktree(resources, originalPath, worktreePath)
+	brief := buildMetaSkillContent("claude", TaskContextForEnv{
+		ProjectID:        "project-1",
+		ProjectTitle:     "Project",
+		ProjectResources: rewritten,
+	})
+
+	if strings.Contains(brief, originalPath) {
+		t.Fatalf("runtime brief still exposes original checkout %q:\n%s", originalPath, brief)
+	}
+	if !strings.Contains(brief, worktreePath) {
+		t.Fatalf("runtime brief does not name task worktree %q:\n%s", worktreePath, brief)
+	}
+	if strings.Contains(string(resources[0].ResourceRef), worktreePath) {
+		t.Fatalf("rewrite mutated the persisted resource ref: %s", resources[0].ResourceRef)
+	}
+}
+
 // TestWriteContextFilesCodebuddyNativeSkills is the regression guard for a
 // bug where CodeBuddy was treated as a drop-in alias for Claude and skills
 // were written to .claude/skills/. CodeBuddy Code is a Claude Code fork but

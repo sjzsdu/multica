@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -139,10 +140,11 @@ const (
 // keeps the historical one-task-at-a-time behavior, worktree gives each task an
 // isolated git worktree so tasks run concurrently.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath     string   `json:"local_path"`
+	DaemonID      string   `json:"daemon_id"`
+	Label         string   `json:"label,omitempty"`
+	ExecutionMode string   `json:"execution_mode,omitempty"`
+	SparsePaths   []string `json:"sparse_paths,omitempty"`
 }
 
 // requireWorktreeCapableDaemon rejects saving a local_directory ref that asks
@@ -181,15 +183,30 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 	// its runtime row at registration. Version numbers cannot answer this — a
 	// dev-built daemon reports a git-describe string that the version floor
 	// deliberately exempts (MUL-5707).
-	if daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+	if !daemonAdvertisesCapability(runtimes, ref.DaemonID, protocol.DaemonCapabilityLocalWorktreeV1) {
+		// Fail closed when no runtime for this daemon advertises it — including a
+		// daemon_id with no registered runtime at all: a worktree resource that can
+		// never dispatch correctly is worse than a save-time error.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error": fmt.Sprintf(
+				"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+				ref.LocalPath),
+			"code":            "daemon_version_unsupported",
+			"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
+			"min_version":     agentpkg.MinLocalWorktreeCLIVersion,
+			"daemon_id":       ref.DaemonID,
+		})
+		return false
+	}
+	if len(ref.SparsePaths) == 0 || daemonAdvertisesCapability(runtimes, ref.DaemonID, protocol.DaemonCapabilityLocalSparseWorktreeV1) {
 		return true
 	}
 	// Fail closed when no runtime for this daemon advertises it — including a
-	// daemon_id with no registered runtime at all: a worktree resource that can
-	// never dispatch correctly is worse than a save-time error.
+	// daemon_id with no registered runtime at all: a sparse worktree resource that
+	// silently falls back to a full checkout is worse than a save-time error.
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 		"error": fmt.Sprintf(
-			"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+			"local_directory: %q is set to sparse worktree mode, but the Multica runtime on that machine does not support sparse checkout. Restart or update the daemon on that machine, or remove sparse_paths.",
 			ref.LocalPath),
 		"code":            "daemon_version_unsupported",
 		"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
@@ -212,6 +229,10 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 // A row missing the capability is never skipped: being the newest is what makes
 // it authoritative, not whether its answer is convenient.
 func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
+	return daemonAdvertisesCapability(runtimes, daemonID, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+func daemonAdvertisesCapability(runtimes []db.AgentRuntime, daemonID, capability string) bool {
 	if strings.TrimSpace(daemonID) == "" {
 		return false
 	}
@@ -228,7 +249,7 @@ func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool 
 	if newest == nil {
 		return false
 	}
-	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+	return runtimeHasCapability(newest.Metadata, capability)
 }
 
 // runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
@@ -292,9 +313,41 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
 			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
 	}
+	if len(payload.SparsePaths) > 0 && payload.ExecutionMode != localDirectoryModeWorktree {
+		return nil, errors.New("local_directory: sparse_paths requires execution_mode=worktree")
+	}
+	normalizedSparse, err := normalizeSparsePaths(payload.SparsePaths)
+	if err != nil {
+		return nil, err
+	}
+	payload.SparsePaths = normalizedSparse
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeSparsePaths(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		p := filepath.ToSlash(strings.TrimSpace(raw))
+		p = strings.Trim(p, "/")
+		if p == "" {
+			return nil, errors.New("local_directory: sparse_paths entries cannot be empty")
+		}
+		if filepath.IsAbs(raw) || strings.HasPrefix(p, "../") || p == ".." || strings.Contains(p, "/../") {
+			return nil, fmt.Errorf("local_directory: sparse path %q must be a relative path inside the repository", raw)
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
 	}
 	return out, nil
 }
