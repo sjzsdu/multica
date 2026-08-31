@@ -98,6 +98,19 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
 	},
+	{
+		ID:                "jcode",
+		ProtocolFamily:    "hermes",
+		DefaultCommand:    "jcode",
+		EnvPrefix:         "MULTICA_JCODE",
+		DisplayName:       "jcode",
+		SkillsDir:         ".jcode/skills",
+		UserSkillsDir:     ".jcode/skills",
+		LaunchHeader:      "jcode acp",
+		DefaultExecutable: "jcode",
+		ProviderLabel:     "jcode",
+		ModelDiscovery:    discoverHermesModels,
+	},
 }
 
 // BuiltinRuntimeByID returns the descriptor for the given runtime identity,
@@ -141,6 +154,14 @@ type backendOverrideApplicator interface {
 // providerLabel fields. The method is defined here (not in pi.go) to keep
 // the descriptor→backend contract in one file.
 func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+}
+
+// hermesBackend implements the same interface via the same fields. Both
+// families host built-in runtime identities (omp on pi, jcode on hermes)
+// that need their own executable and label.
+func (b *hermesBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
 }

@@ -249,12 +249,49 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // the Codex-specific JSON-RPC methods.
 //
 // opts.ThinkingLevel is applied through applyACPEffortOption below, driven by
-// whatever effort option the session advertises. This provider covers two
-// unrelated binaries — Hermes Agent and jcode — with opposite capabilities
-// here, so the catalog is the only honest discriminator; see
-// acpCatalogThinkingProviders in thinking.go for which is which.
+// whatever effort option the session advertises. This backend covers unrelated
+// binaries with opposite capabilities here — Hermes Agent advertises no effort,
+// jcode advertises and applies one — so the catalog is the only honest
+// discriminator; see acpCatalogThinkingProviders in thinking.go.
+//
+// Besides the `hermes` family itself (Hermes Agent, plus any custom runtime
+// profile that picked this family), it backs built-in runtime identities that
+// speak the same ACP dialect under a different binary — jcode; see
+// BuiltinRuntimes. Those arrive through NewRuntime, which sets
+// defaultExecutable/providerLabel below so the fallback binary name and the
+// operator-facing error strings name the CLI that was actually launched rather
+// than "hermes".
+//
+// A compatibility exception verified against one of those binaries must be
+// scoped with Config.builtinRuntimeIs, NOT with a bare Config.BuiltinRuntime
+// check — the latter now also matches every other identity on this family.
 type hermesBackend struct {
 	cfg Config
+	// defaultExecutable is the binary to launch when cfg.ExecutablePath is
+	// empty. Defaults to "hermes" so direct constructions keep working.
+	defaultExecutable string
+	// providerLabel is the human-facing runtime name used in the errors an
+	// operator reads. Defaults to "hermes" when empty. Internal log prefixes
+	// deliberately keep saying "hermes": they identify the protocol backend
+	// handling the stream, which is the honest answer there.
+	providerLabel string
+}
+
+// fallbackExecutable is the binary name used when no explicit path was
+// resolved for this launch.
+func (b *hermesBackend) fallbackExecutable() string {
+	if b.defaultExecutable != "" {
+		return b.defaultExecutable
+	}
+	return "hermes"
+}
+
+// label is the runtime name to put in front of an operator.
+func (b *hermesBackend) label() string {
+	if b.providerLabel != "" {
+		return b.providerLabel
+	}
+	return "hermes"
 }
 
 var (
@@ -265,10 +302,10 @@ var (
 func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "hermes"
+		execPath = b.fallbackExecutable()
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", b.label(), execPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects)
@@ -277,7 +314,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// silently dropping all MCP servers.
 	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("hermes: invalid mcp_config: %w", err)
+		return nil, fmt.Errorf("%s: invalid mcp_config: %w", b.label(), err)
 	}
 
 	timeout := opts.Timeout
@@ -381,7 +418,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stdin:                      stdin,
 		pending:                    make(map[int]*pendingRPC),
 		pendingTools:               make(map[string]*pendingToolCall),
-		toolStartCarriesFinalInput: b.cfg.BuiltinRuntime,
+		// Scoped to the real Hermes Agent binary, not merely to "a built-in
+		// runtime on the hermes family" — see the field's own comment and
+		// Config.builtinRuntimeIs. jcode registers as its own identity on this
+		// family and must keep deferring.
+		toolStartCarriesFinalInput: b.cfg.builtinRuntimeIs("hermes"),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
 		},
@@ -2559,8 +2600,13 @@ var acpRuntimesToleratingOmittedMcpCapabilities = map[string]bool{
 // exactly the unverified implementation the allowlist exists to exclude.
 // Config.BuiltinRuntime is the daemon's report of which case this is, and
 // it defaults to false so any caller that doesn't set it fails closed.
+// It also has to be the family's OWN binary, not just any built-in runtime
+// registered under that family: jcode is a built-in identity on the hermes
+// family and is no more verified than the custom profile it replaced, so
+// Config.builtinRuntimeIs compares the runtime identity rather than reading
+// BuiltinRuntime as "the vendor's binary".
 func acpToleratesOmittedMcpCapabilities(backend string, cfg Config) bool {
-	return cfg.BuiltinRuntime && acpRuntimesToleratingOmittedMcpCapabilities[backend]
+	return cfg.builtinRuntimeIs(backend) && acpRuntimesToleratingOmittedMcpCapabilities[backend]
 }
 
 // filterACPMcpServersByCapability drops remote MCP entries whose transport
