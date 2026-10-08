@@ -341,6 +341,28 @@ type Config struct {
 	LaunchPrefix []string
 }
 
+// builtinRuntimeIs reports whether this launch is the vendor's own binary for
+// the named runtime identity — the precondition for any compatibility
+// exception that was verified against one specific implementation.
+//
+// BuiltinRuntime alone is not enough to answer that, and reading it that way is
+// a live foot-gun. Several protocol families host more than one built-in
+// runtime identity (see BuiltinRuntimes), and a family-scoped exception written
+// as `cfg.BuiltinRuntime && backend == "hermes"` silently starts applying to
+// every OTHER identity registered under that family the moment one is added —
+// exactly the unverified implementation the exception was written to exclude.
+// Comparing the identity closes that: only the family's own binary matches.
+//
+// An empty provider is treated as the identity because New() fills it from the
+// agent type, so it can only be empty when a caller (a test) constructed Config
+// directly, and there the family IS the identity.
+func (c Config) builtinRuntimeIs(runtimeID string) bool {
+	if !c.BuiltinRuntime {
+		return false
+	}
+	return c.provider == "" || c.provider == runtimeID
+}
+
 // New creates a Backend for the given agent type.
 // Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
 //

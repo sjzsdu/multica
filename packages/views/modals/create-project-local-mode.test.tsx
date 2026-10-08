@@ -17,6 +17,12 @@ let runtimeWorktreeMetadata: "advertised" | "daemon_cannot" | "server_recorded_n
   "advertised";
 // What the desktop validator reports for the picked folder.
 let pickedIsGitRepo: boolean | undefined = true;
+let desktopShell = true;
+let daemonStatus: { daemonId: string | null; deviceName: string | null; running: boolean } = {
+  daemonId: "daemon-1",
+  deviceName: "MacBook",
+  running: true,
+};
 
 const createProjectMock = vi.fn().mockResolvedValue({ id: "p1", slug: "p1" });
 
@@ -42,7 +48,15 @@ vi.mock("@tanstack/react-query", () => ({
     return {
       data: [
         {
+          id: "runtime-1",
+          workspace_id: "workspace-1",
           daemon_id: "daemon-1",
+          name: "Claude",
+          runtime_mode: "local",
+          provider: "claude",
+          launch_header: "Claude",
+          status: "online",
+          device_info: "MacBook",
           metadata: {
             cli_version: runtimeCliVersion,
             // A capability-aware server always writes the key — null when the
@@ -53,6 +67,11 @@ vi.mock("@tanstack/react-query", () => ({
                 ? { capabilities: ["skill-bundles-v1"] }
                 : {}),
           },
+          owner_id: "u1",
+          visibility: "private",
+          last_seen_at: "2026-08-26T00:00:00Z",
+          created_at: "2026-08-26T00:00:00Z",
+          updated_at: "2026-08-26T00:00:00Z",
         },
       ],
     };
@@ -109,8 +128,11 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 vi.mock("../navigation", () => ({ useNavigation: () => ({ push: vi.fn() }) }));
 vi.mock("../editor", () => {
-  const ContentEditor = React.forwardRef<HTMLTextAreaElement, { placeholder?: string }>(
-    ({ placeholder }, ref) => <textarea ref={ref} placeholder={placeholder} />,
+  const ContentEditor = React.forwardRef<{ getMarkdown: () => string }, { placeholder?: string }>(
+    ({ placeholder }, ref) => {
+      React.useImperativeHandle(ref, () => ({ getMarkdown: () => "" }));
+      return <textarea placeholder={placeholder} />;
+    },
   );
   ContentEditor.displayName = "ContentEditor";
   return {
@@ -135,13 +157,13 @@ vi.mock("../projects/components/project-due-date-picker", () => ({
 
 // Desktop-only surface: without these the Local directory tab never renders.
 vi.mock("../platform/local-directory", () => ({
-  isDesktopShell: () => true,
+  isDesktopShell: () => desktopShell,
   pickDirectory: () =>
     Promise.resolve({ ok: true, path: "/Users/dev/work/game-client", basename: "game-client" }),
   validateLocalDirectory: () => Promise.resolve({ ok: true, is_git_repo: pickedIsGitRepo }),
 }));
 vi.mock("../platform/use-local-daemon-status", () => ({
-  useLocalDaemonStatus: () => ({ daemonId: "daemon-1", deviceName: "MacBook", running: true }),
+  useLocalDaemonStatus: () => daemonStatus,
 }));
 
 // Render overlays inline so their contents are assertable.
@@ -182,6 +204,8 @@ describe("CreateProjectModal — local directory execution mode", () => {
     runtimeWorktreeMetadata = "advertised";
     serverValidatesWorktree = true;
     pickedIsGitRepo = true;
+    desktopShell = true;
+    daemonStatus = { daemonId: "daemon-1", deviceName: "MacBook", running: true };
   });
 
   // Preselection, not a silent default change: a git repo the runtime can
@@ -310,6 +334,33 @@ describe("CreateProjectModal — local directory execution mode", () => {
     expect(screen.getByRole("radio", { name: /Run in parallel, isolated/i })).toBeDisabled();
     expect(screen.getByText(/not a git repository/i)).toBeInTheDocument();
   });
+
+  it("lets local web create a project from a manual worktree sparse directory", async () => {
+    desktopShell = false;
+    daemonStatus = { daemonId: null, deviceName: null, running: false };
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /Local directory/i }));
+    await user.type(screen.getByLabelText(/Local directory path/i), "/Users/dev/work/flex");
+    await user.click(screen.getByRole("button", { name: /^Add$/i }));
+    await user.click(screen.getByRole("radio", { name: /Run in parallel, isolated/i }));
+    await user.type(
+      screen.getByLabelText(/Sparse checkout paths/i),
+      "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    );
+    await user.click(screen.getByRole("button", { name: /^Create project$/i }));
+
+    await waitFor(() => expect(createProjectMock).toHaveBeenCalledTimes(1));
+    const payload = createProjectMock.mock.calls[0]?.[0] as { resources?: Array<{ resource_ref: unknown }> };
+    expect(payload.resources?.[0]?.resource_ref).toEqual({
+      local_path: "/Users/dev/work/flex",
+      daemon_id: "daemon-1",
+      label: "flex",
+      execution_mode: "worktree",
+      sparse_paths: ["frontend/flow360-ui-next", "frontend/graphic/uvf"],
+    });
+  });
 });
 
 // The payload is what the server stores and the daemon later reads; a missing
@@ -344,5 +395,22 @@ describe("buildLocalDirectoryResourceRef", () => {
         mode: "in_place",
       }),
     ).toEqual({ local_path: "/tmp/x", daemon_id: "d", execution_mode: "in_place" });
+  });
+
+  it("carries sparse paths only for worktree mode", () => {
+    expect(
+      buildLocalDirectoryResourceRef({
+        localPath: "/tmp/x",
+        daemonId: "d",
+        label: null,
+        mode: "worktree",
+        sparsePaths: ["frontend/a"],
+      }),
+    ).toEqual({
+      local_path: "/tmp/x",
+      daemon_id: "d",
+      execution_mode: "worktree",
+      sparse_paths: ["frontend/a"],
+    });
   });
 });

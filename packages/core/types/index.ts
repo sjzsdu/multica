@@ -302,6 +302,13 @@ export type {
   SquadActiveIssueBrief,
   SquadMemberStatus,
   SquadMemberStatusListResponse,
+  SquadWorkflowMode,
+  SquadWorkflowCompletionSignal,
+  SquadWorkflowMergeMode,
+  SquadWorkflowPolicy,
+  SquadWorkflowGate,
+  SquadWorkflowApproval,
+  SquadWorkflowRun,
 } from "./squad";
 export type {
   BillingBalance,

@@ -37,6 +37,7 @@ export function ModelPicker({
   canEdit = true,
   variant = "chip",
   showLabel = true,
+  renderTrigger,
   onChange,
 }: {
   runtimeId: string | null;
@@ -46,6 +47,14 @@ export function ModelPicker({
   canEdit?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
+  /**
+   * Full custom trigger (markup AND content) for surfaces where the chip
+   * look would clobber an established display — e.g. the agents list cell,
+   * which keeps its plain model-id rendering. The picker computes the
+   * accessible title and hands it over as `{ title }`; the popover, search,
+   * and selection logic stay here. Ignored when `canEdit` is false.
+   */
+  renderTrigger?: (context: { title: string }) => React.ReactElement;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -165,42 +174,48 @@ export function ModelPicker({
       align="start"
       tooltip={triggerTitle}
       triggerRender={
-        <button
-          type="button"
-          className={
-            variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
-              : CHIP_CLASS
-          }
-          aria-label={triggerTitle}
-        />
-      }
-      trigger={
-        <>
-          {variant === "field" ? (
-            <Cpu
-              className="h-4 w-4 shrink-0 text-muted-foreground"
-              aria-hidden="true"
-            />
-          ) : null}
-          <span
+        renderTrigger ? (
+          renderTrigger({ title: triggerTitle })
+        ) : (
+          <button
+            type="button"
             className={
               variant === "field"
-                ? "min-w-0 flex-1 truncate font-mono"
-                : "min-w-0 truncate font-mono text-micro"
+                ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+                : CHIP_CLASS
             }
-          >
-            {triggerLabel}
-          </span>
-          {variant === "field" ? (
-            <ChevronDown
-              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
-                open ? "rotate-180" : ""
-              }`}
-              aria-hidden="true"
-            />
-          ) : null}
-        </>
+            aria-label={triggerTitle}
+          />
+        )
+      }
+      trigger={
+        renderTrigger ? null : (
+          <>
+            {variant === "field" ? (
+              <Cpu
+                className="h-4 w-4 shrink-0 text-muted-foreground"
+                aria-hidden="true"
+              />
+            ) : null}
+            <span
+              className={
+                variant === "field"
+                  ? "min-w-0 flex-1 truncate font-mono"
+                  : "min-w-0 truncate font-mono text-micro"
+              }
+            >
+              {triggerLabel}
+            </span>
+            {variant === "field" ? (
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                  open ? "rotate-180" : ""
+                }`}
+                aria-hidden="true"
+              />
+            ) : null}
+          </>
+        )
       }
       header={
         <ModelSearchHeader

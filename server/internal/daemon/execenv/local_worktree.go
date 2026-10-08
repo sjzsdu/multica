@@ -106,6 +106,9 @@ type LocalWorktreeParams struct {
 	WorkspaceID    string
 	AgentID        string
 	ConversationID string
+	// SparsePaths optionally limits the task worktree to repo-relative paths via
+	// git sparse-checkout. Empty means a full worktree.
+	SparsePaths []string
 }
 
 // owner is the identity a branch created for this task is recorded under.
@@ -379,7 +382,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	}
 
 	plan := resolveTaskBranch(gitRoot, params, headSHA, logger)
-	actualBranch, createdBranch, err := addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID)
+	sparsePaths := normalizeWorktreeSparsePaths(params.SparsePaths)
+	actualBranch, createdBranch, err := addLocalWorktree(gitRoot, worktreePath, plan, params.TaskID, sparsePaths)
 	if err != nil {
 		return nil, err
 	}
@@ -1279,30 +1283,99 @@ func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logge
 // git allows one worktree per branch, and refusing to run is worse than
 // delivering onto a task-scoped branch. It forks from the same base, so the
 // sibling still stands on the conversation's latest work.
-func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID string) (string, bool, error) {
+func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID string, sparsePaths []string) (string, bool, error) {
 	var args []string
 	switch {
 	case plan.continues:
-		args = []string{"worktree", "add", worktreePath, plan.name}
+		args = []string{"worktree", "add"}
+		if len(sparsePaths) > 0 {
+			args = append(args, "--no-checkout")
+		}
+		args = append(args, worktreePath, plan.name)
 	case plan.reset:
 		// -B moves the branch to base. Nothing is lost: this path only runs
 		// once the branch has been proven an ancestor of HEAD.
-		args = []string{"worktree", "add", "-B", plan.name, worktreePath, plan.base}
+		args = []string{"worktree", "add", "-B", plan.name}
+		if len(sparsePaths) > 0 {
+			args = append(args, "--no-checkout")
+		}
+		args = append(args, worktreePath, plan.base)
 	default:
-		args = []string{"worktree", "add", "-b", plan.name, worktreePath, plan.base}
+		args = []string{"worktree", "add", "-b", plan.name}
+		if len(sparsePaths) > 0 {
+			args = append(args, "--no-checkout")
+		}
+		args = append(args, worktreePath, plan.base)
 	}
 	out, err := runGit(gitRoot, args...)
 	if err == nil {
+		if len(sparsePaths) > 0 {
+			if err := configureSparseCheckout(worktreePath, sparsePaths); err != nil {
+				return "", false, err
+			}
+		}
 		return plan.name, !plan.continues, nil
 	}
 	if !branchUnavailable(out) {
 		return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 	}
 	alt := plan.altName(taskID)
-	if out, err := runGit(gitRoot, "worktree", "add", "-b", alt, worktreePath, plan.base); err != nil {
+	altArgs := []string{"worktree", "add", "-b", alt}
+	if len(sparsePaths) > 0 {
+		altArgs = append(altArgs, "--no-checkout")
+	}
+	altArgs = append(altArgs, worktreePath, plan.base)
+	if out, err := runGit(gitRoot, altArgs...); err != nil {
 		return "", false, fmt.Errorf("execenv: git worktree add: %s: %w", strings.TrimSpace(out), err)
 	}
+	if len(sparsePaths) > 0 {
+		if err := configureSparseCheckout(worktreePath, sparsePaths); err != nil {
+			return "", false, err
+		}
+	}
 	return alt, true, nil
+}
+
+// configureSparseCheckout enables sparse-checkout in a newly created
+// worktree. The worktree is created with --no-checkout so Git does not first
+// materialise the entire repository before applying the requested paths.
+func configureSparseCheckout(worktreePath string, sparsePaths []string) error {
+	if out, err := runGit(worktreePath, "sparse-checkout", "init", "--cone"); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout init: %s: %w", strings.TrimSpace(out), err)
+	}
+	args := append([]string{"sparse-checkout", "set"}, sparsePaths...)
+	if out, err := runGit(worktreePath, args...); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout set: %s: %w", strings.TrimSpace(out), err)
+	}
+	if out, err := runGit(worktreePath, "checkout", "--force", "HEAD"); err != nil {
+		return fmt.Errorf("execenv: git sparse-checkout checkout: %s: %w", strings.TrimSpace(out), err)
+	}
+	return nil
+}
+
+// normalizeWorktreeSparsePaths removes whitespace, leading/trailing slashes,
+// empty entries and duplicates before paths are passed to Git. Validation that
+// paths are relative to the repository belongs at the request boundary; this
+// helper only normalizes values already accepted by the daemon.
+func normalizeWorktreeSparsePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		path := filepath.ToSlash(strings.TrimSpace(raw))
+		path = strings.Trim(path, "/")
+		if path == "" || path == "." {
+			continue
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		out = append(out, path)
+	}
+	return out
 }
 
 // branchUnavailable recognises git refusing a branch that another worktree

@@ -768,6 +768,121 @@ func allBuiltinSkillsForTest() []AgentSkillData {
 	return (&TaskService{}).AllBuiltinSkills()
 }
 
+func TestAutopilotsSkillCoversDispatchAndSideEffects(t *testing.T) {
+	skill, ok := findSkill(t, "multica-autopilots")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"An autopilot is not an agent",
+		"create_issue",
+		"run_only",
+		"multica autopilot trigger-add <autopilot-id> --kind schedule",
+		"multica autopilot trigger <autopilot-id> --output json",
+		"Do not run `trigger`",
+		"webhook tokens",
+		"{{date}}",
+		"squad's leader agent",
+		"references/autopilots-source-map.md",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("autopilots skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/autopilots-source-map.md") {
+		t.Errorf("autopilots skill missing supporting file references/autopilots-source-map.md")
+	}
+}
+
+func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
+	skill, ok := findSkill(t, "multica-runtimes-and-repos")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"agent_task_queue",
+		"daemon polls/claims the task",
+		"multica runtime list --output json",
+		"multica repo checkout <url>",
+		"MULTICA_DAEMON_PORT",
+		"resource_ref.ref",
+		"github_repo",
+		"local_directory",
+		"Runtime and repo commands affect active agent execution",
+		"references/runtimes-and-repos-source-map.md",
+		// An agent reads this to know whether its checkout can be committed to.
+		// Codex on Linux and Windows gets task-local Git metadata; every other
+		// runtime gets a linked worktree (multica-ai/multica#2925, #6449).
+		"Linux and Windows Codex",
+		"task-local Git metadata",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("runtimes-and-repos skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/runtimes-and-repos-source-map.md") {
+		t.Errorf("runtimes-and-repos skill missing supporting file references/runtimes-and-repos-source-map.md")
+	}
+}
+
+func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
+	skill, ok := findSkill(t, "multica-projects-and-resources")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"Projects are durable context containers",
+		".multica/project/resources.json",
+		"multica project resource list <project-id> --output json",
+		"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
+		"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
+		"multica project resource add <project-id> --type local_directory",
+		"Project resources are durable and affect future tasks",
+		"github_repo.resource_ref.url",
+		"SSH-config host alias",
+		"local-only",
+		"resource_ref.ref",
+		"references/projects-and-resources-source-map.md",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("projects-and-resources skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/projects-and-resources-source-map.md") {
+		t.Errorf("projects-and-resources skill missing supporting file references/projects-and-resources-source-map.md")
+	}
+}
+
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range allBuiltinSkillsForTest() {
@@ -777,6 +892,18 @@ func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	}
 	t.Errorf("built-in skill %q not found", name)
 	return AgentSkillData{}, false
+}
+
+// skillHasFile reports whether the skill ships a supporting file at the given
+// path. Built-in skills load their embedded reference files into Files, so
+// missing source-map files surface here instead of failing at agent runtime.
+func skillHasFile(skill AgentSkillData, path string) bool {
+	for _, f := range skill.Files {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // splitFrontmatter returns the top-level scalar keys of a leading YAML

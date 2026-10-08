@@ -336,10 +336,34 @@ DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 # recursive one — which prints `go: Command not found` on frontend-only
 # checkouts with no Go toolchain installed.
 build: EXE = $(if $(filter windows,$(or $(GOOS),$(shell go env GOOS))),.exe,)
-build: ## Build the server, CLI, and migrate binaries into server/bin
+build: build-web-embed ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server$(EXE) ./cmd/server
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica$(EXE) ./cmd/multica
 	cd server && go build -o bin/migrate$(EXE) ./cmd/migrate
+
+build-web-embed: ## Build the web frontend into server/cmd/multica/web_dist for go:embed
+	MULTICA_EMBED_WEB=true pnpm --dir apps/web run build
+	rm -rf server/cmd/multica/web_dist
+	mkdir -p server/cmd/multica/web_dist/apps/web/.next server/cmd/multica/web_dist/apps/web/public
+	cp -RL apps/web/.next/standalone/. server/cmd/multica/web_dist/
+	cp -RL apps/web/.next/static server/cmd/multica/web_dist/apps/web/.next/static
+	cp -RL apps/web/public/. server/cmd/multica/web_dist/apps/web/public/
+	printf '%s\n%s\n' 'This directory is populated by `make build-web-embed` before compiling `multica`.' 'Keep this file so `go:embed all:web_dist` has a stable path in source checkouts.' > server/cmd/multica/web_dist/README.txt
+
+
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: build ## Build and install the multica CLI into INSTALL_DIR (default: ~/.local/bin)
+	mkdir -p "$(INSTALL_DIR)"
+	install -m 0755 server/bin/multica "$(INSTALL_DIR)/multica"
+	@echo "✓ Installed multica to $(INSTALL_DIR)/multica"
+
+INSTALL_DIR ?= $(HOME)/.local/bin
+
+install: build ## Build and install the multica CLI into INSTALL_DIR (default: ~/.local/bin)
+	mkdir -p "$(INSTALL_DIR)"
+	install -m 0755 server/bin/multica "$(INSTALL_DIR)/multica"
+	@echo "✓ Installed multica to $(INSTALL_DIR)/multica"
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)

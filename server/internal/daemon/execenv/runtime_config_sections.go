@@ -511,6 +511,26 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	} else {
 		b.WriteString("This project has no resources attached yet.\n\n")
 	}
+	if projectIsLocalOnly(ctx) {
+		b.WriteString("Execution and delivery boundary: this project supplies a `local_directory` but no `github_repo`. Work only in the bound local directory. Do not infer a remote from workspace settings, run `multica repo checkout`, push, create or update a pull request, or merge remote work. If remote delivery is required, ask the user to attach the intended GitHub repository first.\n\n")
+	}
+}
+
+// projectIsLocalOnly identifies the project shape whose delivery must stay on
+// the user's machine. This is intentionally derived from the authoritative
+// task context rather than a daemon-local setting: the server already removes
+// workspace repo fallback for this shape, and the brief makes that boundary
+// explicit to every provider.
+func projectIsLocalOnly(ctx TaskContextForEnv) bool {
+	if len(ctx.Repos) != 0 {
+		return false
+	}
+	for _, resource := range ctx.ProjectResources {
+		if resource.ResourceType == "local_directory" {
+			return true
+		}
+	}
+	return false
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue

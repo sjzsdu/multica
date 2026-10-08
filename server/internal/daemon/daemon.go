@@ -8155,7 +8155,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
-			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath, SparsePaths: localAssignment.Ref.SparsePaths}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -8429,6 +8429,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if resumeReachable {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
+	if env.LocalWorktree != nil && localAssignment != nil {
+		taskCtx.ProjectResources = execenv.RewriteLocalDirectoryResourcesForWorktree(
+			taskCtx.ProjectResources, localAssignment.AbsPath, env.WorkDir)
+	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
@@ -8543,6 +8547,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if githubAccount, err := githubAccountForTask(task.Repos); err != nil {
+		return TaskResult{}, err
+	} else if githubAccount != "" {
+		token, tokenErr := resolveGitHubAccountToken(ctx, githubAccount)
+		if tokenErr != nil {
+			return TaskResult{}, tokenErr
+		}
+		// Set after custom_env so a project's selected account is authoritative.
+		// It is task-local, so concurrent projects never switch gh's global
+		// active account or overwrite one another's identity.
+		agentEnv["GH_TOKEN"] = token
+		agentEnv["GH_HOST"] = "github.com"
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -10029,6 +10046,48 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
+}
+
+// githubAccountForTask resolves the one GitHub CLI identity a task may use.
+// A project is an execution/delivery boundary, so mixing named accounts across
+// its repositories would make a single task's PR identity ambiguous. Legacy
+// resources without gh_account keep the daemon's normal gh identity.
+func githubAccountForTask(repos []RepoData) (string, error) {
+	account := ""
+	for _, repo := range repos {
+		candidate := strings.TrimSpace(repo.GitHubAccount)
+		if candidate == "" {
+			continue
+		}
+		if account == "" {
+			account = candidate
+			continue
+		}
+		if account != candidate {
+			return "", fmt.Errorf("project repositories request different GitHub CLI accounts (%q and %q); use one gh_account per project", account, candidate)
+		}
+	}
+	return account, nil
+}
+
+// resolveGitHubAccountToken asks the daemon host's gh installation for one
+// already-authenticated account token. The account name is durable project
+// configuration; the token never crosses the server boundary or is persisted
+// by Multica. We deliberately avoid `gh auth switch`, which mutates global
+// state and would race concurrent tasks from different projects.
+func resolveGitHubAccountToken(parent context.Context, account string) (string, error) {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", "auth", "token", "--hostname", "github.com", "--user", account)
+	output, err := cmd.Output()
+	if err != nil || ctx.Err() != nil {
+		return "", fmt.Errorf("GitHub CLI is not authenticated as %q on this daemon; run `gh auth login` for that account before starting the task", account)
+	}
+	token := strings.TrimSpace(string(output))
+	if token == "" {
+		return "", fmt.Errorf("GitHub CLI returned no token for account %q on this daemon", account)
+	}
+	return token, nil
 }
 
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {

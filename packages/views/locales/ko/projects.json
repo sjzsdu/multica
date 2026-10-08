@@ -85,7 +85,7 @@
     "section_header": "리소스",
     "empty": "첨부된 리소스가 없습니다.",
     "add_button": "리소스 추가",
-    "popover_title": "GitHub 저장소 연결",
+    "popover_title": "리소스 연결",
     "repos_search_placeholder": "저장소 검색...",
     "repos_search_empty": "검색 결과와 일치하는 저장소가 없습니다.",
     "attached_badge": "연결됨",
@@ -149,7 +149,14 @@
     "toast_ref_update_failed": "브랜치를 업데이트하지 못했습니다",
     "ref_error_commit": "이것은 브랜치가 아니라 커밋입니다. 작업은 시작한 브랜치로 결과를 전달합니다. 일회성 리비전이 필요하면 multica repo checkout --ref를 사용하세요.",
     "ref_default_label": "기본 브랜치",
-    "ref_default_tooltip": "브랜치가 설정되지 않음 — 작업은 그 시점의 저장소 기본 브랜치를 사용합니다."
+    "ref_default_tooltip": "브랜치가 설정되지 않음 — 작업은 그 시점의 저장소 기본 브랜치를 사용합니다.",
+    "manual_local_path_label": "로컬 디렉터리 경로",
+    "manual_local_path_placeholder": "/Users/you/project",
+    "manual_local_path_hint": "웹에서는 daemon이 실행 중인 머신의 절대 경로를 입력합니다. daemon이 작업 실행 시 검증합니다.",
+    "sparse_paths_label": "스파스 체크아웃 경로",
+    "sparse_paths_placeholder": "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    "sparse_paths_hint": "선택 사항입니다. 저장소 상대 경로를 한 줄에 하나씩 입력합니다. 병렬 worktree 모드에서만 사용됩니다.",
+    "sparse_badge": "스파스"
   },
   "delete_dialog": {
     "title": "프로젝트 삭제",

@@ -34,7 +34,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { AgentRuntime, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -94,18 +94,57 @@ export function buildLocalDirectoryResourceRef({
   daemonId,
   label,
   mode,
+  sparsePaths = [],
 }: {
   localPath: string;
   daemonId: string;
   label: string | null;
   mode: LocalDirectoryExecutionMode;
+  sparsePaths?: string[];
 }): Record<string, unknown> {
   return {
     local_path: localPath,
     daemon_id: daemonId,
     ...(label ? { label } : {}),
     execution_mode: mode,
+    ...(mode === "worktree" && sparsePaths.length > 0 ? { sparse_paths: sparsePaths } : {}),
   };
+}
+
+function inferSingleOnlineLocalDaemonId(runtimes: readonly AgentRuntime[]): string | null {
+  const daemonIds = new Set<string>();
+  for (const runtime of runtimes) {
+    if (
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id
+    ) {
+      daemonIds.add(runtime.daemon_id);
+    }
+  }
+  return daemonIds.size === 1 ? [...daemonIds][0] ?? null : null;
+}
+
+function parseSparsePathsText(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\n,]+/)) {
+    const path = raw.trim().replace(/^\/+|\/+$/g, "");
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+function isAbsolutePathLike(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function lastPathPart(path: string): string {
+  const normalized = path.replace(/[\\/]+$/g, "");
+  const parts = normalized.split(/[\\/]+/);
+  return parts[parts.length - 1] || path;
 }
 
 function RepoUrlText({
@@ -205,6 +244,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [sourceMode, setSourceMode] = useState<"repos" | "local">("repos");
   const [selectedLocalPath, setSelectedLocalPath] = useState<string | null>(null);
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
+  const [manualLocalPath, setManualLocalPath] = useState("");
   const [localPickError, setLocalPickError] = useState<string | null>(null);
   const [localPicking, setLocalPicking] = useState(false);
   // Execution mode is chosen here rather than after creation: it decides
@@ -215,6 +255,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // in_place. Only then does the folder-derived preselection apply, so an
   // explicit choice is never overridden by a later folder change.
   const [localMode, setLocalMode] = useState<LocalDirectoryExecutionMode | null>(null);
+  const [localSparsePathsText, setLocalSparsePathsText] = useState("");
   // undefined = could not check (older desktop build); the daemon re-checks
   // authoritatively, so unknown stays permissive.
   const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
@@ -225,6 +266,16 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // same call that creates the project, so an un-caught rejection would fail the
   // whole creation — check up front and disable the option instead.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  const { data: myRuntimes = [] } = useQuery(runtimeListOptions(wsId, "me"));
+  // Web has no Electron preload (`window.daemonAPI`), so infer the daemon that
+  // belongs to this browser from the user's single online local daemon in the
+  // workspace. Desktop keeps using the preload's authoritative daemon id.
+  const inferredWebDaemonId = desktop
+    ? null
+    : inferSingleOnlineLocalDaemonId(myRuntimes);
+  const localDaemonId = daemonStatus.daemonId ?? inferredWebDaemonId;
+  const localDaemonRunning = daemonStatus.running || inferredWebDaemonId !== null;
+  const localSourceAvailable = desktop || localDaemonId !== null;
   // Capability, not version: a dev-built daemon reports a git-describe string
   // that the version floor exempts, so the version check passed for a binary
   // with no worktree implementation (MUL-5707). A backend too old to record the
@@ -234,7 +285,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // create path, and rejects with a message the modal surfaces.
   const localAdvertisesWorktree = runtimeAdvertisesLocalWorktree(
     runtimes,
-    daemonStatus.daemonId,
+    localDaemonId,
   );
   // One declared boolean from the live server. Servers older than the worktree
   // save gate drop execution_mode and answer 201, so "the backend will check"
@@ -297,18 +348,40 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       }
       setSelectedLocalPath(picked.path);
       setSelectedLocalLabel(picked.basename ?? null);
+      setManualLocalPath(picked.path);
       setLocalIsGitRepo(validation.is_git_repo);
     } finally {
       setLocalPicking(false);
     }
   };
 
+  const applyManualLocalDirectory = () => {
+    const path = manualLocalPath.trim();
+    if (!path) return;
+    setLocalPickError(null);
+    if (!localDaemonId || !localDaemonRunning) {
+      setLocalPickError(t(($) => $.create_project.local_daemon_offline));
+      return;
+    }
+    if (!isAbsolutePathLike(path)) {
+      setLocalPickError(tProjects(($) => $.resources.local_validate_not_absolute));
+      return;
+    }
+    setSelectedLocalPath(path);
+    setSelectedLocalLabel(lastPathPart(path));
+    // Web cannot inspect the filesystem. Leave worktree selectable and let the
+    // server/daemon validate at save/task time, same as the project resource form.
+    setLocalIsGitRepo(undefined);
+  };
+
   const clearLocalDirectory = () => {
     setSelectedLocalPath(null);
     setSelectedLocalLabel(null);
+    setManualLocalPath("");
     setLocalPickError(null);
     setLocalIsGitRepo(undefined);
     setLocalMode(null);
+    setLocalSparsePathsText("");
   };
 
   // Sync field changes to draft store
@@ -369,16 +442,17 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     } else if (
       sourceMode === "local" &&
       selectedLocalPath &&
-      daemonStatus.daemonId
+      localDaemonId
     ) {
       resources = [
         {
           resource_type: "local_directory" as const,
           resource_ref: buildLocalDirectoryResourceRef({
             localPath: selectedLocalPath,
-            daemonId: daemonStatus.daemonId,
+            daemonId: localDaemonId,
             label: selectedLocalLabel,
             mode: effectiveLocalMode,
+            sparsePaths: parseSparsePathsText(localSparsePathsText),
           }),
         },
       ];
@@ -762,11 +836,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               }
             />
             <PopoverContent side="top" align="start" className="w-72 p-2 space-y-2">
-              {/* Source mode is binary — repo OR local directory, never both.
-                  Local option is desktop-only because a local_directory
-                  resource has to be pinned to a daemon_id, which doesn't
-                  exist on the web. */}
-              {desktop && (
+              {/* Source mode is binary — repo OR local directory, never both. */}
+              {localSourceAvailable && (
                 <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-0.5">
                   <button
                     type="button"
@@ -955,7 +1026,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       the resource. If it's offline, surface why and disable
                       the picker; once it boots we re-render automatically
                       via useLocalDaemonStatus. */}
-                  {daemonStatus.daemonId && daemonStatus.running ? (
+                  {localDaemonId && localDaemonRunning ? (
                     <p className="text-micro text-muted-foreground">
                       {t(($) => $.create_project.local_on_device, {
                         device: daemonStatus.deviceName ?? t(($) => $.create_project.local_this_machine),
@@ -965,6 +1036,45 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     <p className="text-micro text-amber-600 dark:text-amber-400">
                       {t(($) => $.create_project.local_daemon_offline)}
                     </p>
+                  )}
+
+                  {!desktop && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        applyManualLocalDirectory();
+                      }}
+                      className="space-y-1 border-t pt-2"
+                    >
+                      <label
+                        className="text-micro font-medium text-muted-foreground"
+                        htmlFor="create-project-local-directory-path"
+                      >
+                        {tProjects(($) => $.resources.manual_local_path_label)}
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          id="create-project-local-directory-path"
+                          type="text"
+                          value={manualLocalPath}
+                          onChange={(e) => setManualLocalPath(e.target.value)}
+                          placeholder={tProjects(($) => $.resources.manual_local_path_placeholder)}
+                          className="min-w-0 flex-1 rounded-md border bg-transparent px-2 py-1 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-caption"
+                          disabled={!manualLocalPath.trim() || !localDaemonRunning}
+                        >
+                          {t(($) => $.create_project.repos_add)}
+                        </Button>
+                      </div>
+                      <p className="text-micro text-muted-foreground">
+                        {tProjects(($) => $.resources.manual_local_path_hint)}
+                      </p>
+                    </form>
                   )}
 
                   {selectedLocalPath ? (
@@ -1028,34 +1138,60 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                             />
                           </PopoverContent>
                         </Popover>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 flex-1 min-w-0 text-caption"
-                          onClick={handlePickLocalDirectory}
-                          disabled={localPicking || !daemonStatus.running}
-                        >
-                          <span className="truncate">
-                            {t(($) => $.create_project.local_change)}
-                          </span>
-                        </Button>
+                        {desktop && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 flex-1 min-w-0 text-caption"
+                            onClick={handlePickLocalDirectory}
+                            disabled={localPicking || !localDaemonRunning}
+                          >
+                            <span className="truncate">
+                              {t(($) => $.create_project.local_change)}
+                            </span>
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="w-full text-caption"
-                      onClick={handlePickLocalDirectory}
-                      disabled={localPicking || !daemonStatus.running}
-                    >
-                      <FolderOpen className="size-3" />
-                      {localPicking
-                        ? t(($) => $.create_project.local_picking)
-                        : t(($) => $.create_project.local_pick)}
-                    </Button>
+                    desktop && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="w-full text-caption"
+                        onClick={handlePickLocalDirectory}
+                        disabled={localPicking || !localDaemonRunning}
+                      >
+                        <FolderOpen className="size-3" />
+                        {localPicking
+                          ? t(($) => $.create_project.local_picking)
+                          : t(($) => $.create_project.local_pick)}
+                      </Button>
+                    )
+                  )}
+
+                  {selectedLocalPath && effectiveLocalMode === "worktree" && (
+                    <div className="space-y-1">
+                      <label
+                        className="text-micro font-medium text-muted-foreground"
+                        htmlFor="create-project-local-sparse-paths"
+                      >
+                        {tProjects(($) => $.resources.sparse_paths_label)}
+                      </label>
+                      <textarea
+                        id="create-project-local-sparse-paths"
+                        value={localSparsePathsText}
+                        onChange={(e) => setLocalSparsePathsText(e.target.value)}
+                        placeholder={tProjects(($) => $.resources.sparse_paths_placeholder)}
+                        rows={3}
+                        className="w-full resize-none rounded-md border bg-transparent px-2 py-1 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                      />
+                      <p className="text-micro text-muted-foreground">
+                        {tProjects(($) => $.resources.sparse_paths_hint)}
+                      </p>
+                    </div>
                   )}
 
                   {localPickError && (

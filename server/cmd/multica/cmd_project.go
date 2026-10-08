@@ -151,10 +151,12 @@ func init() {
 	projectResourceAddCmd.Flags().String("type", "github_repo", "Resource type (e.g. github_repo, local_directory — see docs)")
 	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (only used when --type github_repo)")
 	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (only used when --type github_repo)")
+	projectResourceAddCmd.Flags().String("gh-account", "", "Shortcut: locally authenticated gh account for this project's PR operations (github_repo)")
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
-	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how runs share the directory — in_place (default, one run at a time) or worktree (each run gets its own git worktree; requires a git repo) (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how tasks share the directory — in_place (default, one task at a time) or worktree (each task gets its own git worktree; requires a git repo) (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().StringArray("sparse-path", nil, "Shortcut: sparse checkout path relative to the repo root; repeatable (local_directory worktree mode)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -163,10 +165,12 @@ func init() {
 	// optional so the caller can edit one thing at a time.
 	projectResourceUpdateCmd.Flags().String("url", "", "Shortcut: new repo URL (github_repo)")
 	projectResourceUpdateCmd.Flags().String("default-branch-hint", "", "Shortcut: new default branch hint (github_repo)")
+	projectResourceUpdateCmd.Flags().String("gh-account", "", "Shortcut: locally authenticated gh account for this project's PR operations (github_repo; empty clears)")
 	projectResourceUpdateCmd.Flags().String("local-path", "", "Shortcut: new absolute local path (local_directory)")
 	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref-label", "", "Shortcut: new label embedded in resource_ref (local_directory)")
 	projectResourceUpdateCmd.Flags().String("execution-mode", "", "Shortcut: new execution mode — in_place or worktree (local_directory)")
+	projectResourceUpdateCmd.Flags().StringArray("sparse-path", nil, "Shortcut: replace sparse checkout paths; repeatable; pass no values by omitting the flag")
 	projectResourceUpdateCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref")
 	projectResourceUpdateCmd.Flags().String("label", "", "New human-readable label; pass an empty string to clear")
 	projectResourceUpdateCmd.Flags().Bool("clear-label", false, "Clear the human-readable label")
@@ -612,6 +616,9 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 			if mode, _ := cmd.Flags().GetString("execution-mode"); strings.TrimSpace(mode) != "" {
 				ref["execution_mode"] = strings.TrimSpace(mode)
 			}
+			if sparse, _ := cmd.Flags().GetStringArray("sparse-path"); len(sparse) > 0 {
+				ref["sparse_paths"] = sparse
+			}
 			body["resource_ref"] = ref
 		default:
 			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
@@ -800,8 +807,9 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 	case "github_repo":
 		urlSet := cmd.Flags().Changed("url")
 		hintSet := cmd.Flags().Changed("default-branch-hint")
+		accountSet := cmd.Flags().Changed("gh-account")
 		refSet := cmd.Flags().Changed("ref")
-		if !urlSet && !hintSet && !refSet {
+		if !urlSet && !hintSet && !accountSet && !refSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
@@ -816,6 +824,9 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			if checkoutRef, ok := existingRef["ref"].(string); ok && strings.TrimSpace(checkoutRef) != "" {
 				ref["ref"] = strings.TrimSpace(checkoutRef)
+			}
+			if account, ok := existingRef["gh_account"].(string); ok && strings.TrimSpace(account) != "" {
+				ref["gh_account"] = strings.TrimSpace(account)
 			}
 		}
 		if urlSet {
@@ -832,6 +843,14 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				delete(ref, "default_branch_hint")
 			} else {
 				ref["default_branch_hint"] = hint
+			}
+		}
+		if accountSet {
+			account := strings.TrimSpace(mustString(cmd, "gh-account"))
+			if account == "" {
+				delete(ref, "gh_account")
+			} else {
+				ref["gh_account"] = account
 			}
 		}
 		if refSet {
@@ -851,7 +870,8 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		daemonSet := cmd.Flags().Changed("daemon-id")
 		labelSet := cmd.Flags().Changed("ref-label")
 		modeSet := cmd.Flags().Changed("execution-mode")
-		if !pathSet && !daemonSet && !labelSet && !modeSet {
+		sparseSet := cmd.Flags().Changed("sparse-path")
+		if !pathSet && !daemonSet && !labelSet && !modeSet && !sparseSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
@@ -867,6 +887,17 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			if m, ok := existingRef["execution_mode"].(string); ok && strings.TrimSpace(m) != "" {
 				ref["execution_mode"] = strings.TrimSpace(m)
+			}
+			if s, ok := existingRef["sparse_paths"].([]any); ok && len(s) > 0 {
+				paths := make([]string, 0, len(s))
+				for _, item := range s {
+					if p, ok := item.(string); ok && strings.TrimSpace(p) != "" {
+						paths = append(paths, strings.TrimSpace(p))
+					}
+				}
+				if len(paths) > 0 {
+					ref["sparse_paths"] = paths
+				}
 			}
 		}
 		if pathSet {
@@ -899,6 +930,20 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				delete(ref, "execution_mode")
 			} else {
 				ref["execution_mode"] = mode
+			}
+		}
+		if sparseSet {
+			sparse, _ := cmd.Flags().GetStringArray("sparse-path")
+			paths := make([]string, 0, len(sparse))
+			for _, p := range sparse {
+				if strings.TrimSpace(p) != "" {
+					paths = append(paths, strings.TrimSpace(p))
+				}
+			}
+			if len(paths) == 0 {
+				delete(ref, "sparse_paths")
+			} else {
+				ref["sparse_paths"] = paths
 			}
 		}
 		if v, ok := ref["local_path"].(string); !ok || v == "" {

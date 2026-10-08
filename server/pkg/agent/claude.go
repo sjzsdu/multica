@@ -36,16 +36,29 @@ func claudeTerminateGrace() time.Duration {
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
 type claudeBackend struct {
-	cfg Config
+	cfg               Config
+	defaultExecutable string
+	providerLabel     string
+}
+
+func (b *claudeBackend) runtimeLabel() string {
+	if b.providerLabel != "" {
+		return b.providerLabel
+	}
+	return "claude"
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
-		execPath = "claude"
+		execPath = b.defaultExecutable
+		if execPath == "" {
+			execPath = "claude"
+		}
 	}
+	runtimeLabel := b.runtimeLabel()
 	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
+		return nil, fmt.Errorf("%s executable not found at %q: %w", runtimeLabel, execPath, err)
 	}
 
 	timeout := opts.Timeout
@@ -107,12 +120,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdout pipe: %w", err)
+		return nil, fmt.Errorf("%s stdout pipe: %w", runtimeLabel, err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("claude stdin pipe: %w", err)
+		return nil, fmt.Errorf("%s stdin pipe: %w", runtimeLabel, err)
 	}
 	inputWriter := &claudeInputWriter{w: stdin}
 	var supplements *claudeSupplementSession
@@ -131,16 +144,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "["+runtimeLabel+":stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
-		return nil, fmt.Errorf("start claude: %w", err)
+		return nil, fmt.Errorf("start %s: %w", runtimeLabel, err)
 	}
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info(runtimeLabel+" started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
 	// The process started — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -373,10 +386,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		completionGuardError := ""
 		if sawAsyncLaunch {
-			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
+			completionGuardError = runtimeLabel + " launched an async background task; Multica-managed runs require foreground execution"
 		}
 		finalStatus, finalOutput, finalError := finalizeStreamResult(
-			"claude",
+			runtimeLabel,
 			timeout,
 			runCtx.Err(),
 			writeErr,
@@ -400,10 +413,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// task's error field, which is the only place users see it.
 		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrTail)
+			finalError = withAgentStderr(finalError, runtimeLabel, stderrTail)
 		}
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
-			provider:                   "claude",
+			provider:                   runtimeLabel,
 			cliVersion:                 b.cfg.CLIVersion,
 			model:                      opts.Model,
 			exitCode:                   streamProcessExitCode(exitErr),
@@ -420,7 +433,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
-		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+		b.cfg.Logger.Info(runtimeLabel+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		// The account-binding 400 arrives in the result event (finalError);
 		// "no conversation found" is printed to stderr. Check both.
@@ -434,7 +447,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					usage = resultUsage
 				}
 			}
-			b.cfg.Logger.Info("claude resume was rejected; dropping session id and signalling fresh-session retry",
+			b.cfg.Logger.Info(runtimeLabel+" resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)

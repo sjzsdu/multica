@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -89,6 +90,7 @@ type githubRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 	Ref               string `json:"ref,omitempty"`
+	GitHubAccount     string `json:"gh_account,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -107,6 +109,10 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	payload.Ref = strings.TrimSpace(payload.Ref)
 	if err := validateGitRef(payload.Ref); err != nil {
 		return nil, fmt.Errorf("github_repo: %w", err)
+	}
+	payload.GitHubAccount = strings.TrimSpace(payload.GitHubAccount)
+	if strings.ContainsAny(payload.GitHubAccount, " \t\r\n") {
+		return nil, errors.New("github_repo: gh_account cannot contain whitespace")
 	}
 	out, err := json.Marshal(payload)
 	if err != nil {
@@ -142,10 +148,11 @@ const (
 // keeps the historical one-task-at-a-time behavior, worktree gives each task an
 // isolated git worktree so tasks run concurrently.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath     string   `json:"local_path"`
+	DaemonID      string   `json:"daemon_id"`
+	Label         string   `json:"label,omitempty"`
+	ExecutionMode string   `json:"execution_mode,omitempty"`
+	SparsePaths   []string `json:"sparse_paths,omitempty"`
 }
 
 // requireWorktreeCapableDaemon rejects saving a local_directory ref that asks
@@ -184,15 +191,30 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 	// its runtime row at registration. Version numbers cannot answer this — a
 	// dev-built daemon reports a git-describe string that the version floor
 	// deliberately exempts (MUL-5707).
-	if daemonAdvertisesWorktree(runtimes, ref.DaemonID) {
+	if !daemonAdvertisesCapability(runtimes, ref.DaemonID, protocol.DaemonCapabilityLocalWorktreeV1) {
+		// Fail closed when no runtime for this daemon advertises it — including a
+		// daemon_id with no registered runtime at all: a worktree resource that can
+		// never dispatch correctly is worse than a save-time error.
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"error": fmt.Sprintf(
+				"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+				ref.LocalPath),
+			"code":            "daemon_version_unsupported",
+			"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
+			"min_version":     agentpkg.MinLocalWorktreeCLIVersion,
+			"daemon_id":       ref.DaemonID,
+		})
+		return false
+	}
+	if len(ref.SparsePaths) == 0 || daemonAdvertisesCapability(runtimes, ref.DaemonID, protocol.DaemonCapabilityLocalSparseWorktreeV1) {
 		return true
 	}
 	// Fail closed when no runtime for this daemon advertises it — including a
-	// daemon_id with no registered runtime at all: a worktree resource that can
-	// never dispatch correctly is worse than a save-time error.
+	// daemon_id with no registered runtime at all: a sparse worktree resource that
+	// silently falls back to a full checkout is worse than a save-time error.
 	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
 		"error": fmt.Sprintf(
-			"local_directory: %q is set to parallel (worktree) mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
+			"local_directory: %q is set to sparse worktree mode, but the Multica runtime on that machine does not support sparse checkout. Restart or update the daemon on that machine, or remove sparse_paths.",
 			ref.LocalPath),
 		"code":            "daemon_version_unsupported",
 		"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
@@ -215,6 +237,10 @@ func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Re
 // A row missing the capability is never skipped: being the newest is what makes
 // it authoritative, not whether its answer is convenient.
 func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
+	return daemonAdvertisesCapability(runtimes, daemonID, protocol.DaemonCapabilityLocalWorktreeV1)
+}
+
+func daemonAdvertisesCapability(runtimes []db.AgentRuntime, daemonID, capability string) bool {
 	if strings.TrimSpace(daemonID) == "" {
 		return false
 	}
@@ -231,7 +257,7 @@ func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool 
 	if newest == nil {
 		return false
 	}
-	return runtimeHasCapability(newest.Metadata, protocol.DaemonCapabilityLocalWorktreeV1)
+	return runtimeHasCapability(newest.Metadata, capability)
 }
 
 // runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
@@ -295,9 +321,41 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, fmt.Errorf("local_directory: execution_mode must be %q or %q, got %q",
 			localDirectoryModeInPlace, localDirectoryModeWorktree, payload.ExecutionMode)
 	}
+	if len(payload.SparsePaths) > 0 && payload.ExecutionMode != localDirectoryModeWorktree {
+		return nil, errors.New("local_directory: sparse_paths requires execution_mode=worktree")
+	}
+	normalizedSparse, err := normalizeSparsePaths(payload.SparsePaths)
+	if err != nil {
+		return nil, err
+	}
+	payload.SparsePaths = normalizedSparse
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+func normalizeSparsePaths(paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(paths))
+	for _, raw := range paths {
+		p := filepath.ToSlash(strings.TrimSpace(raw))
+		p = strings.Trim(p, "/")
+		if p == "" {
+			return nil, errors.New("local_directory: sparse_paths entries cannot be empty")
+		}
+		if filepath.IsAbs(raw) || strings.HasPrefix(p, "../") || p == ".." || strings.Contains(p, "/../") {
+			return nil, fmt.Errorf("local_directory: sparse path %q must be a relative path inside the repository", raw)
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -968,9 +1026,12 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 //
 // Repo precedence: project-bound github_repo resources override workspace repos
 // when present. Mixing both would just confuse the agent — if a project
-// explicitly attached its repos, those are the authoritative set. With no
-// project, no github_repo resources, or a stale reference, the workspace repos
-// are the fallback.
+// explicitly attached its repos, those are the authoritative set. A project
+// with a local_directory but no github_repo is deliberately local-only: it
+// must not inherit the workspace repository list, since doing so can make an
+// agent check out, push to, or open a PR against an unrelated remote. With no
+// project, a project with neither kind of resource, or a stale reference, the
+// workspace repos are the fallback.
 func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
 	var out claimProjectContext
 
@@ -1000,7 +1061,7 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 
-	if len(out.Repos) > 0 {
+	if len(out.Repos) > 0 || hasLocalDirectoryResource(out.Resources) {
 		return out, nil
 	}
 
@@ -1021,6 +1082,19 @@ func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, wor
 		}
 	}
 	return out, nil
+}
+
+// hasLocalDirectoryResource distinguishes an explicitly local project from a
+// project that simply has no repository configured yet. The distinction is a
+// delivery boundary, not a display preference: local projects must never fall
+// back to workspace GitHub repositories.
+func hasLocalDirectoryResource(resources []ProjectResourceData) bool {
+	for _, resource := range resources {
+		if resource.ResourceType == "local_directory" {
+			return true
+		}
+	}
+	return false
 }
 
 // projectResourcesForClaim maps resource rows onto the claim wire shape and
@@ -1049,11 +1123,12 @@ func projectResourcesForClaim(rows []db.ProjectResource) ([]ProjectResourceData,
 		})
 		if row.ResourceType == "github_repo" {
 			var payload struct {
-				URL string `json:"url"`
-				Ref string `json:"ref,omitempty"`
+				URL           string `json:"url"`
+				Ref           string `json:"ref,omitempty"`
+				GitHubAccount string `json:"gh_account,omitempty"`
 			}
 			if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-				repos = append(repos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+				repos = append(repos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref), GitHubAccount: strings.TrimSpace(payload.GitHubAccount)})
 			}
 		}
 	}

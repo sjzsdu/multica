@@ -91,7 +91,8 @@
   },
   "detail_tabs": {
     "members": "メンバー",
-    "instructions": "指示"
+    "instructions": "指示",
+    "workflow": "ワークフロー"
   },
   "details": {
     "leader": "リーダー",
@@ -125,6 +126,30 @@
     "unsaved_changes": "保存していない変更",
     "save_button": "保存",
     "placeholder": "例：必ず失敗するテストから始める。コミットは小さく独立させる。"
+  },
+  "workflow_tab": {
+    "title": "ワークフローポリシー",
+    "description": "子タスクの進行と親タスクの完了方法を設定します。",
+    "mode_label": "モード",
+    "mode_manual": "手動",
+    "mode_staged": "ステージ制",
+    "mode_delivery": "デリバリー",
+    "max_active_children_label": "最大アクティブ子タスク数",
+    "unlimited_hint": "0 は無制限です。",
+    "auto_promote_label": "ステージを自動で進める",
+    "auto_promote_description": "現在のステージのゲート通過後に次のステージを開始します。",
+    "auto_finalize_label": "親タスクをレビュー待ちへ自動移動",
+    "auto_finalize_description": "全ステージとゲート通過後に親タスクをレビュー待ちへ移動します。完了にはしません。",
+    "require_tests_label": "テストを必須にする",
+    "require_tests_description": "進行前にテストまたはチェックの成功が必要です。",
+    "require_review_label": "レビューを必須にする",
+    "require_review_description": "レビューシグナルまたは人による承認が必要です。",
+    "require_merge_label": "マージを必須にする",
+    "require_merge_description": "選択したマージポリシーを満たす必要があります。",
+    "human_approval_label": "人による承認を必須にする",
+    "human_approval_description": "メンバーがステージを承認するまで停止します。",
+    "changes_hint": "新しい進行と再試行に適用されます。",
+    "save_button": "保存"
   },
   "scope": {
     "mine": "自分",

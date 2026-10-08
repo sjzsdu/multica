@@ -576,6 +576,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
+	if err := ensureDaemonAuthFromLocalState(cmd, profile); err != nil {
+		return err
+	}
 	if err := requireDaemonAuth(profile); err != nil {
 		return err
 	}
