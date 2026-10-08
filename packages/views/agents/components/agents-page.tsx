@@ -101,7 +101,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(120px,1fr)_var(--agc-status-mobile)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(280px,1fr)_var(--agc-runtime)_var(--agc-model)_var(--agc-runs)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-lastactive)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -109,23 +109,20 @@ const ROW_HEIGHT = 64;
 // Single source for hideable column widths: track vars and the grid's
 // min-width derive from the same numbers.
 const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
-  // Sized for the worst case "Online · 2 tasks" (~140px incl. padding);
-  // idle rows show only the dot + label and leave some in-track slack.
-  status: 144,
-  owner: 144,
-  // Fits the longest label "Specific people" (~120px incl. padding).
+  status: 120,
+  owner: 120,
   access: 132,
-  runtime: 144,
+  runtime: 128,
   lastActive: 120,
   runs: 88,
-  model: 120,
+  model: 128,
   created: 104,
 };
 
-// Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
+// Fixed tracks (edges 12+12, checkbox 16, name min 280, kebab 28) plus the
 // 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
 // still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const FIXED_TRACKS_WIDTH = 348 + 11 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -396,6 +393,7 @@ function NameCell({ row }: { row: AgentListRow }) {
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span
+            title={agent.name}
             className={`min-w-0 truncate text-body font-medium ${
               isArchived ? "text-muted-foreground" : ""
             }`}
@@ -419,7 +417,10 @@ function NameCell({ row }: { row: AgentListRow }) {
           )}
         </div>
         {agent.description ? (
-          <div className="mt-0.5 truncate text-caption text-muted-foreground">
+          <div
+            title={agent.description}
+            className="mt-0.5 truncate text-caption text-muted-foreground"
+          >
             {agent.description}
           </div>
         ) : null}
@@ -461,10 +462,14 @@ function StatusCell({ row }: { row: AgentListRow }) {
   }
   const visual = availabilityConfig[presence.availability];
   const active = presence.runningCount + presence.queuedCount;
+  const statusText = `${t(($) => $.availability[presence.availability])}${active > 0 ? ` · ${t(($) => $.row.task_count, { count: active })}` : ""}`;
   return (
     <ListGridCell className="gap-1.5">
       <span className={`size-1.5 shrink-0 rounded-full ${visual.dotClass}`} />
-      <span className={`truncate text-caption ${visual.textClass}`}>
+      <span
+        title={statusText}
+        className={`truncate text-caption ${visual.textClass}`}
+      >
         {t(($) => $.availability[presence.availability])}
         {active > 0 && (
           <span className="text-muted-foreground">
@@ -549,7 +554,10 @@ function RuntimeCell({
   const { agent, runtime, canManage } = row;
 
   const inner = !isAgentRuntimeBound(agent) ? (
-    <span className="truncate text-caption text-amber-600 dark:text-amber-400">
+    <span
+      title={t(($) => $.row.needs_runtime)}
+      className="truncate text-caption text-amber-600 dark:text-amber-400"
+    >
       {t(($) => $.row.needs_runtime)}
     </span>
   ) : runtime ? (
@@ -560,7 +568,10 @@ function RuntimeCell({
         provider={runtime.provider}
         className="h-3.5 w-3.5 shrink-0"
       />
-      <span className="min-w-0 truncate text-caption text-muted-foreground">
+      <span
+        title={runtimeDisplayLabel(runtime)}
+        className="min-w-0 truncate text-caption text-muted-foreground"
+      >
         {runtimeDisplayLabel(runtime)}
       </span>
     </span>
@@ -661,12 +672,16 @@ function ModelCell({
   );
 
   const value = agent.model || "";
+  const displayValue = value || "—";
 
   if (!canManage) {
     return (
       <ListGridCell className="hidden @2xl:flex">
-        <span className="min-w-0 truncate text-caption text-muted-foreground">
-          {value || "—"}
+        <span
+          title={displayValue}
+          className="min-w-0 truncate text-caption text-muted-foreground"
+        >
+          {displayValue}
         </span>
       </ListGridCell>
     );
@@ -686,10 +701,11 @@ function ModelCell({
           <button
             type="button"
             aria-label={title}
+            title={displayValue}
             className="flex w-full min-w-0 cursor-pointer items-center rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent"
           >
             <span className="min-w-0 truncate text-caption text-muted-foreground">
-              {value || "—"}
+              {displayValue}
             </span>
           </button>
         )}
@@ -789,6 +805,32 @@ function AgentListHeader({
       <ListGridHeaderCell sorted={sorted("name")} onSort={() => onSort("name")}>
         {t(($) => $.columns.agent)}
       </ListGridHeaderCell>
+      {isColVisible("runtime") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.runtime)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("model") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.model)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
+      {isColVisible("runs") ? (
+        <ListGridHeaderCell
+          className="hidden @2xl:flex"
+          align="right"
+          sorted={sorted("runs")}
+          onSort={() => onSort("runs")}
+        >
+          {t(($) => $.columns.runs)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
       {isColVisible("status") ? (
         <ListGridHeaderCell>{t(($) => $.columns.status)}</ListGridHeaderCell>
       ) : (
@@ -808,13 +850,6 @@ function AgentListHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
-      {isColVisible("runtime") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.columns.runtime)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
       {isColVisible("lastActive") ? (
         <ListGridHeaderCell
           className="hidden @2xl:flex"
@@ -822,25 +857,6 @@ function AgentListHeader({
           onSort={() => onSort("lastActive")}
         >
           {t(($) => $.columns.last_active)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("runs") ? (
-        <ListGridHeaderCell
-          className="hidden @2xl:flex"
-          align="right"
-          sorted={sorted("runs")}
-          onSort={() => onSort("runs")}
-        >
-          {t(($) => $.columns.runs)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("model") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.columns.model)}
         </ListGridHeaderCell>
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -1291,6 +1307,28 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         onToggle={() => toggleSelected(row.agent.id)}
                       />
                       <NameCell row={row} />
+                      {isColVisible("runtime") ? (
+                        <RuntimeCell
+                          row={row}
+                          runtimes={runtimes}
+                          members={members}
+                          currentUserId={currentUser?.id ?? null}
+                        />
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
+                      {isColVisible("model") ? (
+                        <ModelCell row={row} currentUserId={currentUser?.id ?? null} />
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
+                      {isColVisible("runs") ? (
+                        <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
+                          {row.runCount.toLocaleString(locale)}
+                        </ListGridCell>
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
                       {isColVisible("status") ? (
                         <StatusCell row={row} />
                       ) : (
@@ -1306,30 +1344,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
-                      {isColVisible("runtime") ? (
-                        <RuntimeCell
-                          row={row}
-                          runtimes={runtimes}
-                          members={members}
-                          currentUserId={currentUser?.id ?? null}
-                        />
-                      ) : (
-                        <ListGridCell className="hidden px-0 @2xl:flex" />
-                      )}
                       {isColVisible("lastActive") ? (
                         <LastActiveCell row={row} />
-                      ) : (
-                        <ListGridCell className="hidden px-0 @2xl:flex" />
-                      )}
-                      {isColVisible("runs") ? (
-                        <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
-                          {row.runCount.toLocaleString(locale)}
-                        </ListGridCell>
-                      ) : (
-                        <ListGridCell className="hidden px-0 @2xl:flex" />
-                      )}
-                      {isColVisible("model") ? (
-                        <ModelCell row={row} currentUserId={currentUser?.id ?? null} />
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
