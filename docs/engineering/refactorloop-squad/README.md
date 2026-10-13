@@ -43,7 +43,7 @@ needs a behavior change, the squad reports it instead of smuggling it in.
 
 ```bash
 cd docs/engineering/refactorloop-squad
-./setup.sh                      # picks the first listed runtime, 3 rounds
+./setup.sh                      # picks the first listed runtime, 8 rounds
 RUNTIME_ID=<uuid> CODE_RUNTIME_ID=<uuid> MAX_ROUNDS=5 ./setup.sh
 ```
 
@@ -77,6 +77,13 @@ comment-driven and unattended. Read the issue's comments
 
 - One round = mine (round 1 only) → refactor the dispatched slice → review →
   architect verify.
+- For a system-level direction (layer separation, module split, interface
+  extraction), the round-1 mine must produce a ranked roadmap of N ≥ 2
+  points, not a single slice. The leader dispatches one point per round
+  across rounds; the architect does not accept until every point is applied,
+  descoped with a reason, or sent back to the human as a behavior-change
+  request. Bump `max_rounds` above the default when the direction is
+  system-level — 8 rounds is the floor, not a ceiling.
 - The architect records the verdict:
   `multica issue verdict <issue-id> accept|reject --reason "..."`.
 - A reject increments `pipeline_round` on the issue and starts the next round

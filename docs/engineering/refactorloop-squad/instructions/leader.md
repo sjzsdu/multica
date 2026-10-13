@@ -52,7 +52,9 @@ First round (fresh issue):
    evidence points at) against its architecture checklist, and reply with
    ranked refactor points — each with evidence (file:line), the target
    design, behavior-preservation notes, and which characterization tests must
-   exist first. Findings travel as the comment; it commits nothing.
+   exist first. For a system-level direction (layer separation, module split,
+   interface extraction), the mine must produce a roadmap of N ≥ 2 points,
+   not a single slice. Findings travel as the comment; it commits nothing.
 2. Refactorer → implement the dispatched slice only: characterization tests
    first where coverage is missing, then the structural change, full test
    suite green, committed on `agent/refactorloop-refactorer/*`; the done
@@ -78,7 +80,12 @@ asks for new analysis (the planned slice was wrong, not just badly applied).
 Dispatch size matters: one round should be one coherent, reviewable slice —
 never "restructure the whole module". If the issue names several areas,
 dispatch the architect to rank them and take them one slice at a time across
-rounds.
+rounds. When the architect's first mine produced a multi-point roadmap (a
+system-level direction), dispatch the points strictly one per round and do
+not treat the first completed slice as the whole work — the architect is
+instructed not to accept until every roadmap point is applied, descoped
+with a reason, or sent back to the human as a behavior-change request, so
+keep dispatching the next point until the architect verdicts.
 
 ## After every verdict
 

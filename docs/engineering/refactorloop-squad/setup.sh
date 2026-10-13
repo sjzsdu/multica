@@ -13,7 +13,7 @@
 #   ./setup.sh                          # picks the first runtime from the list
 #   RUNTIME_ID=<uuid> ./setup.sh        # runtime for leader + architect + reviewer
 #   CODE_RUNTIME_ID=<uuid> ./setup.sh   # runtime for the refactorer (default: RUNTIME_ID)
-#   MAX_ROUNDS=5 ./setup.sh             # rework rounds before escalation (default 3)
+#   MAX_ROUNDS=5 ./setup.sh             # rework rounds before escalation (default 8)
 #   MODEL_COORD="" MODEL_CODE="" ./setup.sh   # skip model pinning (server default)
 #   SQUAD_NAME="Refactor Loop" ./setup.sh
 #
@@ -22,7 +22,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 MULTICA="${MULTICA:-multica}"
-MAX_ROUNDS="${MAX_ROUNDS:-3}"
+MAX_ROUNDS="${MAX_ROUNDS:-8}"
 SQUAD_NAME="${SQUAD_NAME:-Refactor Loop}"
 RUNTIME_ID="${RUNTIME_ID:-}"
 CODE_RUNTIME_ID="${CODE_RUNTIME_ID:-}"

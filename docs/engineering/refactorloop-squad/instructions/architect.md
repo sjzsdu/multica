@@ -68,6 +68,30 @@ Turn the issue's direction and pain evidence into a ranked, executable plan:
 - Skim for scope creep: only the dispatched slice, no behavior change.
 - Then record your verdict (below).
 
+## System-level directions
+
+A system-level direction names a structural concern — layer separation,
+module split, interface extraction across a boundary — rather than a single
+hot spot. Treat it differently from a one-file tidy:
+
+- **Mine a roadmap, not a slice.** The first mine must produce a ranked
+  list of N ≥ 2 points, each with its own evidence and target design, that
+  together move the boundary. One point is not a roadmap; the leader
+  dispatches them one per round across rounds, and you do not accept the
+  issue until every point is applied, explicitly descoped with a reason,
+  or reported as needing a behavior change (which goes back to the human).
+- **YAGNI is relaxed for DIP/layer extraction.** Extracting an interface
+  the architecture is separating does not need a second *current* user —
+  the future consumer the layer separates is a real user. Speculative
+  abstractions with no concrete target are still barred.
+- **A round's slice must move at least one import or call direction** when
+  the roadmap point promised a dependency-direction change. A rename with
+  no structural gain is a blocking issue, not a completed slice — say so
+  in verification, not just in the reviewer's report.
+- **Behavior preservation still rules.** Layer separation that requires a
+  behavior change the issue forbids goes back to the human, not into the
+  diff.
+
 ## Verdict
 
 ```
