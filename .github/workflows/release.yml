@@ -7,6 +7,15 @@ on:
       # tags broadly at the trigger layer, then enforce strict semver below.
       - "v*.*.*"
       - "!v*-dirty*"
+  # Fork 自用:在 Actions 页面手动触发,对仓库里已存在的 tag 补跑一次发布
+  # (例如 CI 挂了重跑、或 tag 已推但 workflow 当时没跑)。与 selfhost-images
+  # 的 workflow_dispatch 同一套路:输入 tag 名,所有 job checkout 到该 tag。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的版本 tag(如 v0.6.2),必须是已存在的 tag"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -21,21 +30,30 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # 统一解析要发布的 tag:tag push 事件就是 ref 本身;手动触发用输入值。
+    # 漏洞扫描豁免的比对也用它,保证手动触发与 tag push 行为一致。
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     outputs:
       tag_name: ${{ steps.release_meta.outputs.tag_name }}
       is_stable: ${{ steps.release_meta.outputs.is_stable }}
+      tag_sha: ${{ steps.release_meta.outputs.tag_sha }}
+      tag_sha_short: ${{ steps.release_meta.outputs.tag_sha_short }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # 手动触发时 checkout 到输入的 tag(而不是所在分支 HEAD),
+          # 保证后面所有 job 构建的都是 tag 对应的代码。
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
 
       - name: Validate tag name
         id: release_meta
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          echo "Triggered by tag: $tag"
+          tag="${RELEASE_TAG}"
+          echo "Triggered by ${{ github.event_name }}, releasing tag: $tag"
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
             exit 1
@@ -44,7 +62,15 @@ jobs:
             echo "::error::Refusing to release from dirty tag '$tag'."
             exit 1
           fi
+          # 手动触发时输入的 tag 必须真实存在;顺带拿到 tag 指向的 commit,
+          # 供镜像 build-args 和 sha-<短SHA> 镜像 tag 使用。
+          if ! tag_sha="$(git rev-parse -q --verify "refs/tags/${tag}^{commit}")"; then
+            echo "::error::Tag '$tag' does not exist in this repository."
+            exit 1
+          fi
           echo "tag_name=$tag" >> "$GITHUB_OUTPUT"
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+          echo "tag_sha_short=${tag_sha:0:7}" >> "$GITHUB_OUTPUT"
           if [[ "$tag" == *-* ]]; then
             echo "is_stable=false" >> "$GITHUB_OUTPUT"
           else
@@ -72,13 +98,13 @@ jobs:
       - name: Scan Go vulnerabilities
         # Fail closed unless an administrator scopes the documented emergency
         # override to this exact tag. See .github/RELEASING.md.
-        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG != github.ref_name }}
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG != env.RELEASE_TAG }}
         working-directory: server
         run: go tool govulncheck ./...
 
       - name: Record emergency vulnerability-scan bypass
-        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == github.ref_name }}
-        run: echo "::warning::govulncheck was explicitly skipped for ${GITHUB_REF_NAME}; see .github/RELEASING.md"
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == env.RELEASE_TAG }}
+        run: echo "::warning::govulncheck was explicitly skipped for ${RELEASE_TAG}; see .github/RELEASING.md"
 
   release:
     needs: verify
@@ -92,6 +118,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          # GoReleaser 从当前 checkout 的 tag 推断发布版本;手动触发时
+          # 必须 checkout 到目标 tag,否则会按分支 HEAD 发布。
+          ref: ${{ needs.verify.outputs.tag_name }}
           fetch-depth: 0
 
       - name: Setup Go
@@ -137,6 +166,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag_name }}
 
       - name: Compute backend image labels
         id: meta
@@ -170,7 +201,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=release-backend-${{ env.PLATFORM_PAIR }}
           build-args: |
             VERSION=${{ needs.verify.outputs.tag_name }}
-            COMMIT=${{ github.sha }}
+            COMMIT=${{ needs.verify.outputs.tag_sha }}
           outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -214,7 +245,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ needs.verify.outputs.is_stable == 'true' }}
             type=raw,value=${{ needs.verify.outputs.tag_name }}
-            type=sha,prefix=sha-
+            type=raw,value=sha-${{ needs.verify.outputs.tag_sha_short }}
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -254,6 +285,8 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag_name }}
 
       - name: Compute web image labels
         id: meta
@@ -331,7 +364,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable=${{ needs.verify.outputs.is_stable == 'true' }}
             type=raw,value=${{ needs.verify.outputs.tag_name }}
-            type=sha,prefix=sha-
+            type=raw,value=sha-${{ needs.verify.outputs.tag_sha_short }}
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -365,6 +398,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag_name }}
 
       - name: Setup Helm
         uses: azure/setup-helm@v4
@@ -413,6 +448,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.verify.outputs.tag_name }}
           fetch-depth: 0
 
       - name: Install rpmbuild (Linux)
