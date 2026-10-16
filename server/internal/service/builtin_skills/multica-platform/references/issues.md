@@ -36,10 +36,13 @@ body: removing the key drops the link. After merge or close, existing links stay
 
 When an issue run changes code in a checked-out GitHub repo, the default handoff
 is to open or update a PR before posting the final Multica issue comment, unless
-the user explicitly asked for a local-only change or no PR. This is a default, not
-an unconditional command: if no code changed, say no PR is needed; if PR creation
-is blocked by auth, failing tests, or missing remote state, report that blocker
-instead of pretending the run is complete.
+the user explicitly asked for a local-only change or no PR. A project that exposes
+a `local_directory` but no `github_repo` is always local-only: do not infer a
+workspace remote, push, create/update a PR, or merge remote work for it. Ask the
+user to attach the intended GitHub repository before remote delivery. This is a default, not
+an unconditional command: if no code changed, say no PR is needed;
+if PR creation is blocked by auth, failing tests, or missing remote state, report
+that blocker instead of pretending the run is complete.
 
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
@@ -323,17 +326,28 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The platform's sub-issue wakeup **wakes the parent assignee when a stage
-closes while a later stage is waiting** — every sub-issue up to that stage has
-reached a terminal status (`done`/`cancelled`) — and **once more when every
-sub-issue, staged or not, is closed**. A completion that closes nothing is
-silent. A sibling set with **no** stages wakes the parent once, when the *last*
-sub-issue finishes. A parent in `backlog` is not woken; it catches up once it
-leaves backlog. A member assignee gets an inbox notification instead of a run.
+stages. The server **wakes the parent assignee when a stage finishes** (once
+per barrier) — i.e. every sub-issue in the lowest unfinished stage has reached
+the completion signal selected by the parent squad's workflow policy. The default is
+terminal (`done`/`cancelled`); a staged or delivery squad may select
+`review_ready`, in which case `in_review` also closes the barrier. A completion
+that does not close a stage is silent (no comment, no wake). A sibling set with
+**no** stages is one implicit stage, so the parent is woken once when the last
+sub-issue reaches that signal — not on every child.
 
-Advancement is agent-driven: the server only detects the closed barrier and
-wakes the parent assignee, who then decides whether to promote the next stage's
-`backlog` sub-issues to `todo`.
+By default advancement is agent-driven: the server detects the closed barrier
+and wakes the parent assignee, who decides whether to promote the next stage's
+`backlog` sub-issues to `todo`. A squad with `auto_promote_stage=true` lets the
+server promote that next stage after its configured gates pass. Promotion is
+capacity-limited and idempotent; children that do not fit remain in backlog.
+Closed barriers are durably recorded and retried by the server when a capacity
+slot opens or a required provider gate becomes available.
+With `auto_finalize_parent=true`, the final gated barrier moves the parent to
+`in_review`; the parent is never automatically moved to `done`.
+The workflow run history is available from
+`GET /api/issues/<parent-id>/workflow-runs`; human reviewers can approve or
+revoke `review` and `human_approval` through the corresponding approvals
+endpoint.
 
 ```bash
 # Stage 1 runs now; later stages parked until promoted
@@ -343,9 +357,9 @@ multica issue create --title "Build"      --parent <id> --assignee <agent> --sta
 multica issue create --title "Ship"       --parent <id> --assignee <agent> --stage 3 --status backlog
 ```
 
-When both Stage 1 sub-issues finish you (the parent assignee) are woken by the
-sub-issue wakeup; its `[WAKEUP]` block lists every stage and names the next one.
-Inspect the layout, then promote the next stage:
+When both Stage 1 sub-issues reach the configured signal you (the parent
+assignee) are woken with a stage comment. In manual mode, inspect the layout,
+satisfy the required tests/review/merge gates, then promote the next stage:
 
 ```bash
 multica issue children <parent-id>             # sub-issues grouped by stage

@@ -187,6 +187,8 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
+  workflowRunsAll: () => ["issues", "workflow-runs"] as const,
+  workflowRuns: (issueId: string) => [...issueKeys.workflowRunsAll(), issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
@@ -641,5 +643,12 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+export function issueWorkflowRunsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.workflowRuns(issueId),
+    queryFn: () => api.listIssueWorkflowRuns(issueId),
   });
 }

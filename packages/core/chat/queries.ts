@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
+  ChatPendingTask,
   ChatQuickActionsFailureState,
   ChatQuickActionsPendingState,
   ChatSession,
@@ -167,8 +168,20 @@ export function pendingChatTaskOptions(sessionId: string) {
     queryKey: chatKeys.pendingTask(sessionId),
     queryFn: () => api.getPendingChatTask(sessionId),
     enabled: !!sessionId,
+    // Realtime remains the fast path, but a browser can miss a lifecycle frame
+    // without the socket fully reconnecting (sleep/wake, proxy interruption,
+    // stale tab). With staleTime: Infinity that used to leave a completed task
+    // spinning forever. Poll only while a task is actually pending, then stop.
+    refetchInterval: (query) =>
+      pendingChatTaskRefetchInterval(query.state.data),
     staleTime: Infinity,
   });
+}
+
+export function pendingChatTaskRefetchInterval(
+  task: ChatPendingTask | undefined,
+): number | false {
+  return task?.task_id ? 5_000 : false;
 }
 
 /**

@@ -37,12 +37,55 @@ func newProjectResourceUpdateTestCmd() *cobra.Command {
 	c.Flags().String("daemon-id", "", "")
 	c.Flags().String("ref-label", "", "")
 	c.Flags().String("execution-mode", "", "")
+	c.Flags().StringArray("sparse-path", nil, "")
 	c.Flags().String("ref", "", "")
 	c.Flags().String("label", "", "")
 	c.Flags().Bool("clear-label", false, "")
 	c.Flags().Int32("position", 0, "")
 	c.Flags().String("output", "json", "")
 	return c
+}
+
+func TestBuildResourceRefFromFlagsLocalDirectorySparsePaths(t *testing.T) {
+	t.Run("sets sparse paths", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("sparse-path", "frontend/flow360-ui-next")
+		_ = cmd.Flags().Set("sparse-path", "frontend/graphic/uvf")
+		existing := map[string]any{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree"}
+		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has {
+			t.Fatal("expected has=true")
+		}
+		paths, ok := ref["sparse_paths"].([]string)
+		if !ok {
+			t.Fatalf("sparse_paths type = %T", ref["sparse_paths"])
+		}
+		if got := strings.Join(paths, ","); got != "frontend/flow360-ui-next,frontend/graphic/uvf" {
+			t.Fatalf("sparse_paths = %s", got)
+		}
+	})
+
+	t.Run("unrelated edit preserves existing sparse paths", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("ref-label", "flex-ui")
+		existing := map[string]any{
+			"local_path":     "/Users/foo/flex",
+			"daemon_id":      "d1",
+			"execution_mode": "worktree",
+			"sparse_paths":   []any{"frontend/flow360-ui-next", "frontend/graphic/uvf"},
+		}
+		ref, _, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		paths, ok := ref["sparse_paths"].([]string)
+		if !ok || strings.Join(paths, ",") != "frontend/flow360-ui-next,frontend/graphic/uvf" {
+			t.Fatalf("sparse_paths not preserved: %#v", ref["sparse_paths"])
+		}
+	})
 }
 
 // TestBuildResourceRefFromFlagsGithubMergesHint pins the nit fix from MUL-2662

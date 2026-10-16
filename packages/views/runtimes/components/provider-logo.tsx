@@ -376,6 +376,25 @@ function ZeroClawLogo({ className }: { className: string }) {
   );
 }
 
+// OpenClaude — a lightweight open mark for the OpenClaude runtime identity.
+// It intentionally differs from Claude's Anthropic mark because OpenClaude is
+// a separate CLI with its own provider and configuration ecosystem.
+function OpenClaudeLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <circle cx="12" cy="12" r="8" />
+      <path d="M9 9h6v6H9z" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -386,6 +405,8 @@ export function ProviderLogo({
   switch (provider) {
     case "claude":
       return <ClaudeLogo className={className} />;
+    case "openclaude":
+      return <OpenClaudeLogo className={className} />;
     case "codebuddy":
       return <CodeBuddyLogo className={className} />;
     case "codex":

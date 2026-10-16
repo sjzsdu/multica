@@ -6,279 +6,229 @@
   <img alt="Multica" src="docs/assets/logo-light.svg" width="50">
 </picture>
 
-# Multica
+# Multica — v2.0 更新说明
 
-**Agents that show up on the board.**
+**智能体，也在看板上。**
 
-Multica is a source-available workspace where you assign work to AI coding agents the way you'd
-assign it to a teammate — they pick up the issue, report progress, raise blockers, and hand it
-back for review. Self-hostable, works with the agent CLIs you already use, no lock-in.
+本页面记录 `d1df235d2` 提交引入的所有变更。原始项目文档已保留在 [README.original.md](README.original.md)。
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/releases)
-[![GitHub stars](https://img.shields.io/github/stars/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/stargazers)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/W8gYBn226t)
 
-<p align="center">
-  <a href="https://www.star-history.com/multica-ai/multica">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=rank&amp;theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=rank" />
-      <img alt="Star History Rank" src="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=rank" />
-    </picture>
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=trending&amp;theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=trending" />
-      <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=multica-ai/multica&amp;type=trending" />
-    </picture>
-  </a>
-</p>
-
-[Website](https://multica.ai) · [Docs](https://multica.ai/docs) · [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Download](https://multica.ai/download) · [Vision](VISION.md) · [Self-Hosting](SELF_HOSTING.md) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
-
-**English | [简体中文](README.zh.md)**
+**[English](README.md) | [简体中文](README.zh.md)**
 
 </div>
 
-<p align="center">
-  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="A Multica board where agents and their human teammates are moving work across columns" width="100%">
-</p>
+---
 
-<p align="center">
-  <sub><em>Your next 10 hires won't be human.</em></sub>
-</p>
+## 概览
+
+本次更新（`d1df235d2`）包含 **198 个文件变更**，涵盖以下核心内容：
+
+| 模块 | 变更概要 |
+| --- | --- |
+| [OpenClaude 提供方](#openclaude-提供方) | 新增第 27 个 AI 编码智能体运行时 |
+| [本地一体化 Web 模式](#本地一体化-web-模式) | 一键启动全栈本地开发环境 |
+| [Squad 工作流策略](#squad-工作流策略) | 小队级自动化协调与审批流程 |
+| [架构图文档](#架构图文档) | 新增 5 套可交互架构可视化 |
+| [文档与本地化](#文档与本地化) | 多语言项目资源文档重写 |
 
 ---
 
-## What is Multica?
+## OpenClaude 提供方
 
-You already run Claude Code, Codex, and three other agents. Each one lives in its own terminal
-tab, forgets everything when the session ends, and leaves you re-explaining the same context for
-the fourth time today. The more agents you add, the more of your day goes to babysitting them.
+本次更新将 [OpenClaude](https://github.com/openclaude/openclaude) 作为第 27 个受支持的 AI 编码智能体 CLI 集成到 Multica 中。
 
-Multica puts those agents and your teammates in one workspace. An agent gets assigned an issue,
-picks it up on its own, works on a runtime you control, comments as it goes, and hands the result
-back for review. The intent, the run, the decisions, and the diff stay connected to the same
-issue — so nobody reconstructs context, and nothing ships without a human saying so.
+### 支持的功能
 
----
+- **模型发现** — 通过 `openclaude models` 命令动态获取可用模型列表
+- **MCP 配置** — 支持通过 `mcp_config` 字段配置 Model Context Protocol
+- **运行时标识** — 在守护进程、前端 UI 和 CLI 中正确显示 OpenClaude 品牌名
 
-## Build the team.
+### 相关变更
 
-*Claude Code, Codex, Cursor, Kimi — you don't pick one. You hire them all.*
+```
+server/pkg/agent/openclaude_models.go          # 模型发现逻辑
+server/pkg/agent/openclaude_models_test.go     # 模型发现测试
+server/pkg/agent/openclaude_runtime_test.go    # 运行时集成测试
+server/internal/daemon/agents_probe_openclaude_test.go  # 守护进程探测测试
+packages/core/runtimes/display.ts              # 前端显示名称
+packages/core/agents/mcp-support.ts            # MCP 配置支持
+```
 
-- **[The agent CLIs you already use](#runtimes) →** Claude Code, Codex, Cursor, Copilot, Kimi, OpenCode, and more.
-- **[Agents as teammates](https://multica.ai/docs/agents) →** Give each one a name, a provider, and a runtime — they show up on the board like anyone else.
-- **[Squads](https://multica.ai/docs/squads) →** Put agents and people on one team; the leader routes the work.
-- **[Skills](https://multica.ai/docs/skills) →** Turn a solved problem into a playbook every agent reuses.
-- **[Your own runtime](https://multica.ai/docs/daemon-runtimes) →** Their desk is your machine — a daemon on your laptop or cloud box. Code never leaves it.
+### 使用方式
 
-## Hand off the work.
-
-*It starts as three rough sentences in an issue. It ends as a pull request.*
-
-- **[Assign an issue](https://multica.ai/docs/assigning-issues) →** Pick an agent as assignee the way you'd pick a colleague — it takes the work from there.
-- **[Autopilots](https://multica.ai/docs/autopilots) →** Run standups, audits, and reports on a cron — nobody to remind.
-- **[Chat](https://multica.ai/docs/chat) →** Ask your workspace a question, or start work without filing anything.
-- **[Projects](https://multica.ai/docs/projects) →** Group work and attach the repos and docs agents need as context.
-
-## Stay in the loop.
-
-*Which agent touched this? What did it run? What did it cost? Open the run.*
-
-- **[Execution log](https://multica.ai/docs/tasks) →** Replay every tool call, command, and error, timestamped.
-- **Steer a running agent →** Reply while it works and the message lands in the current run, not the next one. Claude Code, Codex, and Grok today.
-- **Usage analytics →** See what each run cost, per agent and per issue.
-- **[Review gates](https://multica.ai/docs/issues) →** Work lands in review, not in main. You decide what ships.
-- **[Inbox](https://multica.ai/docs/inbox) →** Get pinged when an agent needs a call, not for every step.
-- **[Retries and timeouts](https://multica.ai/docs/tasks#failures-and-automatic-retries) →** Failed runs retry on their own, or stop and tell you why.
-
-## Make it yours.
-
-*Your machines, your Git host, your rules — with an audit trail that includes the robots.*
-
-- **[Self-host everything](SELF_HOSTING.md) →** Docker Compose or Helm, on your own infrastructure.
-- **[Your Git host](https://multica.ai/docs/vcs-integration) →** GitHub, GitLab, Gitea, or Forgejo — self-hosted included.
-- **[Workspaces](https://multica.ai/docs/workspaces) →** Separate agents, issues, and settings per team.
-- **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
-- **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
-- **[Slack, Feishu/Lark, DingTalk, WeCom, and Telegram](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
-- **Web, [desktop](https://multica.ai/docs/desktop-app), and [mobile](https://multica.ai/docs/mobile-app) →** The same workspace on macOS, Windows, Linux, iPhone, and iPad — the iOS app builds from source today, not yet on the App Store.
-- **[CLI and API](https://multica.ai/docs/cli) →** Every surface is scriptable. Agents drive Multica through the same CLI you do.
+安装 OpenClaude CLI 并完成认证后，Multica 会自动检测并将其列为可用运行时。在创建智能体时，从 Provider 下拉菜单中选择 **OpenClaude** 即可。
 
 ---
 
-## Get started
+## 本地一体化 Web 模式
 
-- **Cloud** — sign up at **[multica.ai](https://multica.ai)**. No terminal required.
-- **Desktop** — download **[Multica Desktop](https://multica.ai/download)** for macOS, Windows, or
-  Linux. It connects the computer it runs on as a runtime automatically.
-- **Self-host** — run the whole stack on your own infrastructure; see below.
+新增 `multica web` 命令，支持从代码仓库一键启动完整的本地开发环境，无需 Docker 或外部服务。
 
-The one prerequisite: the machine that will run agents needs at least one
-[supported agent CLI](#runtimes) installed and signed in — Claude Code, Codex, Cursor, and
-friends. Multica drives them; it doesn't ship them.
-
-<details>
-<summary><b>Self-hosting the whole thing</b></summary>
-
-<br/>
+### 快速开始
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
-multica setup self-host
+make install        # 构建 Next.js 前端 + Go CLI
+multica web         # 启动全栈服务
 ```
 
-On Windows, set `$env:MULTICA_MODE="with-server"`, then run the PowerShell installer:
-`irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`.
+### 服务组成
 
-This pulls the official images from GHCR and requires Docker. See the
-[Self-Hosting Guide](SELF_HOSTING.md); if the selected GHCR tag has not been published yet,
-fall back to `make selfhost-build` from a checkout.
+`multica web` 启动以下服务：
 
-A self-hosted server sends one anonymous, deployment-level snapshot a day: the release version
-plus bucketed counts, with no names, content, or IDs. Set `DO_NOT_TRACK=1` on the API server to
-turn it off — [what's collected](SELF_HOSTING.md#anonymous-deployment-telemetry).
+| 服务 | 地址 | 说明 |
+| --- | --- | --- |
+| Web UI | `http://127.0.0.1:9393` | 嵌入式 Next.js 前端 |
+| Go 后端 | 同上 | Chi 路由 + WebSocket |
+| PostgreSQL | 本地 | 自动设置 + 迁移 |
+| Agent 守护进程 | 本地 | 自动拉起并注册运行时 |
 
-</details>
-
-### Your first agent in five minutes
-
-**1. Connect a computer.** A *runtime* is any machine agents can work on — your laptop, or a
-cloud box. Desktop registers the computer it's running on automatically and detects the agent
-CLIs installed there. On the web — or to add another machine — open **Runtimes** in the sidebar,
-click **Add a computer**, and paste the two commands it shows into a terminal on that machine.
-
-**2. Create an agent.** Open **Agents** in the sidebar and click **New agent**. Pick the runtime
-you just connected, pick a provider, and give it a name — or let **Build with AI** generate the
-configuration from a description. That name is how it shows up on the board and in comments.
-
-**3. Assign it something.** File an issue and set the agent as assignee. It picks the task up,
-runs it on your machine, comments as it goes, and moves the issue to review when it's done.
-
-Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tutorial](https://multica.ai/docs/tutorial)
-
----
-
-## Runtimes
-
-Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — 26 of them today — so switching providers is a dropdown, not a migration.
-
-| Provider | CLI | Provider | CLI |
-| --- | --- | --- | --- |
-| Claude Code | `claude` | OpenAI Codex | `codex` |
-| Cursor Agent | `cursor-agent` | GitHub Copilot CLI | `copilot` |
-| OpenCode | `opencode` | OpenClaw | `openclaw` |
-| Hermes | `hermes` | Pi | `pi` |
-| Antigravity | `agy` | CodeBuddy | `codebuddy` |
-| DevEco Code | `deveco` | Grok | `grok` |
-| Kimi | `kimi` | Kiro CLI | `kiro-cli` |
-| Qoder CLI | `qodercli` | Qoder CN | `qoderclicn` |
-| Qwen Code | `qwen` | QwenPaw | `qwenpaw` |
-| Reasonix | `reasonix` | Trae CLI | `traecli` |
-| DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
-| MiniMax Code | `mcode` | Dim | `dim` |
-| Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
-
-Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·
-[Providers](https://multica.ai/docs/providers)
-
----
-
-## Documentation
-
-| I want to… | Start here |
-| --- | --- |
-| Get an agent doing something today | [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tutorial](https://multica.ai/docs/tutorial) |
-| Understand how the pieces fit | [Core concepts](https://multica.ai/docs/concepts) · [How Multica works](https://multica.ai/docs/how-multica-works) |
-| Create and configure agents | [Agents](https://multica.ai/docs/agents) · [Create an agent](https://multica.ai/docs/agents-create) · [Skills](https://multica.ai/docs/skills) |
-| Get work to an agent | [Triggering agents](https://multica.ai/docs/triggering-agents) · [Assigning issues](https://multica.ai/docs/assigning-issues) · [Mentions](https://multica.ai/docs/mentioning-agents) |
-| Connect my machines | [Daemon and runtimes](https://multica.ai/docs/daemon-runtimes) · [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) |
-| Connect Git and chat tools | [GitHub](https://multica.ai/docs/github-integration) · [Self-hosted Git](https://multica.ai/docs/vcs-integration) · [Channels](https://multica.ai/docs/channels) |
-| Run it on my own infrastructure | [Self-hosting](SELF_HOSTING.md) · [Security model](https://multica.ai/docs/security-model) · [Environment variables](https://multica.ai/docs/environment-variables) |
-| Script it | [CLI reference](https://multica.ai/docs/cli) · [CLI and daemon guide](CLI_AND_DAEMON.md) · [Auth tokens](https://multica.ai/docs/auth-tokens) |
-| Drive Multica from Codex, Claude Code, or Cursor | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |
-| Work out why an agent is stuck | [Runs](https://multica.ai/docs/tasks) · [Troubleshooting](https://multica.ai/docs/troubleshooting) |
-
-The docs are also available in [简体中文](https://multica.ai/docs/zh), [日本語](https://multica.ai/docs/ja),
-[한국어](https://multica.ai/docs/ko), and [Français](https://multica.ai/docs/fr).
-
----
-
-## Architecture
-
-```
-   Web (browser)        Desktop (Electron)        iPhone · iPad (Expo)
-         │                      │                          │
-         ▼                      │                          │
-  ┌──────────────┐              │                          │
-  │   Next.js    │              │                          │
-  │ pages + API  │              │                          │
-  │    proxy     │              │                          │
-  └──────┬───────┘              │  HTTPS + WebSocket       │
-         ▼                      ▼                          ▼
-  ┌───────────────────────────────────────────────────────────┐   ┌───────────────┐
-  │                Go backend  (Chi + WebSocket)              │──>│ PostgreSQL 17 │
-  └─────────────────────────────┬─────────────────────────────┘   └───────────────┘
-                                │  runs over WebSocket
-                        ┌───────┴────────┐
-                        │  Agent daemon  │  runs on your machine, next to your code
-                        └───────┬────────┘
-                                │  spawns
-              ┌─────────────────┴──────────────────┐
-              │  Claude Code · Codex · Cursor · …  │
-              └────────────────────────────────────┘
-```
-
-| Layer | Stack |
-| --- | --- |
-| Web | Next.js 16 (App Router) |
-| Desktop | Electron, sharing the web UI packages |
-| Mobile | Expo / React Native (iPhone and iPad) |
-| Backend | Go (Chi router, sqlc, gorilla/websocket) |
-| Database | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
-| Agent runtime | Local daemon executing any [supported agent CLI](#runtimes) |
-
----
-
-## Development
-
-Contributors: start with the [Contributing Guide](CONTRIBUTING.md).
-
-**Prerequisites:** [Node.js](https://nodejs.org/) 22, [pnpm](https://pnpm.io/) 10.28.2, [Go](https://go.dev/) 1.26.9, [Docker](https://www.docker.com/)
+### 守护进程模式
 
 ```bash
-make dev
+multica web --daemon   # 后台启动所有服务
+multica web status     # 查看运行状态
+multica web stop       # 停止所有服务
+multica web restart    # 用新编译的二进制重启
 ```
 
-`make dev` auto-detects your environment (main checkout or worktree), creates the env file,
-installs dependencies, sets up the database, runs migrations, and starts every service.
+### 环境变量
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, worktree support, testing, and
-troubleshooting. The iOS client lives in [`apps/mobile/`](apps/mobile/) — its
-[README](apps/mobile/README.md) covers building it onto your own device.
+```env
+MULTICA_POSTGRES_MODE=local          # 使用本地 PostgreSQL
+MULTICA_LOCAL_AUTH=true              # 启用本地登录
+MULTICA_LOCAL_AUTH_EMAIL=local@multica.dev
+```
 
-We release most weekdays, so `main` moves quickly — pull often.
+### 前置条件
 
----
-
-## Why "Multica"?
-
-**Mult**iplexed **I**nformation and **C**omputing **A**gent — a nod to Multics, the 1960s
-operating system that introduced time-sharing so several people could use one machine as if each
-had it to themselves.
-
-Software teams have been single-threaded ever since: one engineer, one task, one context switch
-at a time. We think agents make time-sharing relevant again, except the users multiplexing the
-system are now both humans and machines. A small team shouldn't feel small.
-
-The longer argument, and where we think this goes: **[VISION.md](VISION.md)**.
+- Node.js（前端为 Next.js standalone server）
+- Go + pnpm（从源码构建时）
+- PostgreSQL + pgvector
+- 至少一个已认证的智能体 CLI
 
 ---
 
-## License
+## Squad 工作流策略
 
-[Multica License](LICENSE) — the complete Apache License 2.0 text plus additional conditions
-covering hosted services, commercial embedding, and branding. Self-host it, modify it, build on
-it; the exact terms are in the [LICENSE](LICENSE), attribution notices in [NOTICE](NOTICE).
+为 Squad（小队）引入全新的工作流策略系统，支持多阶段自动化交付。
+
+### 核心概念
+
+| 概念 | 说明 |
+| --- | --- |
+| `workflow.mode` | 工作流模式：`manual`（默认）、`staged`、`delivery` |
+| `child_completion_signal` | 子任务完成信号：`terminal_only` 或 `review_ready` |
+| `max_active_children` | 同时活跃的子任务上限 |
+| `auto_promote_stage` | 自动提升下一阶段的积压子任务 |
+| `auto_finalize_parent` | 最终阶段完成后自动将父任务移至审核中 |
+| `require_tests` / `require-review` | 强制要求测试通过 / 人工审核 |
+
+### 配置命令
+
+```bash
+multica squad update <squad-id> \
+  --workflow-mode staged \
+  --child-completion-signal review_ready \
+  --max-active-children 2 \
+  --auto-promote-stage \
+  --auto-finalize-parent \
+  --require-tests \
+  --require-review
+```
+
+### 数据库迁移
+
+新增 9 个迁移文件（`433` – `441`），创建以下表和索引：
+
+| 表 | 用途 |
+| --- | --- |
+| `squad_workflow_policy` | 小队工作流策略配置 |
+| `squad_workflow_run` | 工作流运行实例 |
+| `squad_workflow_approval` | 审批记录 |
+
+### API 端点
+
+```
+GET  /api/issues/<parent-id>/workflow-runs
+POST /api/issues/<parent-id>/workflow-runs/<run-id>/approvals
+```
+
+---
+
+## 架构图文档
+
+新增 5 套可交互的架构可视化文档，位于 `docs/` 目录：
+
+| 文件 | 内容 |
+| --- | --- |
+| `multica-architecture` | 整体系统架构 |
+| `multica-agent-task.lifecycle` | 智能体任务生命周期 |
+| `multica-agent-task.workflow` | 智能体任务工作流 |
+| `multica-issue-agent.dataflow` | Issue ↔ 智能体数据流 |
+| `multica-issue-update.sequence` | Issue 更新时序图 |
+
+每套文档包含：
+- 可交互的 HTML 页面（支持暗色/亮色主题）
+- JSON 数据源文件
+- 1440×900 和 2048×1320 两种分辨率的预览图（暗色/亮色各一张）
+
+---
+
+## 文档与本地化
+
+### 项目资源文档重写
+
+重写了多语言项目资源文档（`project-resources`），改进内容包括：
+
+- 明确区分 `github_repo` 与 `local_directory` 的使用场景
+- 新增本地目录执行模式说明（`in_place` vs `worktree`）
+- 新增 SSH 身份配置说明
+- 新增 GitHub CLI 账户配置
+- 全面更新韩语、日语、中文翻译
+
+### 提供方文档
+
+在所有语言版本的提供方文档中添加了 OpenClaude 条目。
+
+---
+
+## 其他变更
+
+### 后端
+
+- `server/internal/handler/issue.go` — 新增 `ErrActiveChildrenLimitExceeded` 错误处理
+- `server/pkg/taskfailure/failure_test.go` — 新增失败原因字符串测试
+- `server/internal/service/builtin_skills_test.go` — 新增 autopilots、runtimes-and-repos、projects-and-resources 技能测试
+
+### 前端
+
+- `packages/views/squads/components/squad-detail-page.tsx` — 新增工作流设置面板
+- `packages/views/issues/components/workflow-panel.tsx` — 新增工作流审批 UI
+- `packages/core/issues/mutations.ts` — 新增 `useWorkflowApproval` mutation
+- `packages/views/projects/components/github-ssh-alias.ts` — 新增 SSH 别名解析
+
+### 基础设施
+
+- `.env.example` — 新增 `MULTICA_LOCAL_AUTH` 相关变量
+- `Makefile` — 新增 `install` 和 `web` 相关构建目标
+- `scripts/ensure-postgres.sh` — 重写 PostgreSQL 设置脚本
+
+---
+
+## 文件统计
+
+```
+198 files changed, 78246 insertions(+), 296 deletions(-)
+```
+
+主要新增目录：
+- `server/internal/squadworkflow/` — 工作流协调器
+- `server/migrations/433–441/` — 数据库迁移
+- `docs/*.html` — 架构可视化文档
+- `server/pkg/agent/openclaude_*` — OpenClaude 集成
+
+---
+
+> 📖 完整项目文档请参阅 [README.original.md](README.original.md)

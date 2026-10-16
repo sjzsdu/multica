@@ -1511,6 +1511,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	r.Post("/auth/local", h.LocalLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API
@@ -2028,6 +2029,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Get("/workflow-runs", h.ListIssueWorkflowRuns)
+					r.With(handler.RequireHumanActor).Post("/workflow-runs/{runId}/approvals", h.UpsertIssueWorkflowApproval)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)
@@ -2162,6 +2165,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
+
+			// Pipeline product verdict (accept / reject, round cap, escalation)
+			r.Post("/api/issues/{id}/pipeline/verdict", h.RecordPipelineVerdict)
 
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {

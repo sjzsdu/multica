@@ -85,7 +85,7 @@
     "section_header": "リソース",
     "empty": "添付されたリソースはありません。",
     "add_button": "リソースを追加",
-    "popover_title": "GitHub リポジトリを添付",
+    "popover_title": "リソースを追加",
     "repos_search_placeholder": "リポジトリを検索...",
     "repos_search_empty": "検索条件に一致するリポジトリはありません。",
     "attached_badge": "添付済み",
@@ -149,7 +149,14 @@
     "toast_ref_update_failed": "ブランチを更新できませんでした",
     "ref_error_commit": "これはコミットであり、ブランチではありません。タスクは開始したブランチへ成果を返します。特定のリビジョンだけが必要な場合は multica repo checkout --ref を使ってください。",
     "ref_default_label": "デフォルトブランチ",
-    "ref_default_tooltip": "ブランチ未設定 — タスクはその時点のリポジトリのデフォルトブランチを使用します。"
+    "ref_default_tooltip": "ブランチ未設定 — タスクはその時点のリポジトリのデフォルトブランチを使用します。",
+    "manual_local_path_label": "ローカルディレクトリのパス",
+    "manual_local_path_placeholder": "/Users/you/project",
+    "manual_local_path_hint": "Web では daemon が動いているマシン上の絶対パスを入力します。daemon がタスク実行時に検証します。",
+    "sparse_paths_label": "スパースチェックアウトのパス",
+    "sparse_paths_placeholder": "frontend/flow360-ui-next\nfrontend/graphic/uvf",
+    "sparse_paths_hint": "任意。リポジトリ内の相対パスを 1 行に 1 つ入力します。並列 worktree モードでのみ使われます。",
+    "sparse_badge": "Sparse"
   },
   "delete_dialog": {
     "title": "プロジェクトを削除",

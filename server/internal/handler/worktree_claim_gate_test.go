@@ -122,6 +122,42 @@ func TestWorktreeClaimBlockReason(t *testing.T) {
 	})
 }
 
+func TestLocalDirectoryDaemonClaimBlockReason(t *testing.T) {
+	resources := []ProjectResourceData{
+		{ID: "a", ResourceType: "local_directory", ResourceRef: localDirRef(t, "/Users/dev/a", "daemon-a", "in_place")},
+		{ID: "b", ResourceType: "local_directory", ResourceRef: localDirRef(t, "/Users/dev/b", "daemon-b", "worktree")},
+	}
+
+	t.Run("allows any runtime on a bound daemon", func(t *testing.T) {
+		if reason := localDirectoryDaemonClaimBlockReason(resources, runtimeWithVersion("daemon-b", "9.9.9")); reason != "" {
+			t.Fatalf("matching daemon was blocked: %q", reason)
+		}
+	})
+
+	t.Run("blocks a different daemon", func(t *testing.T) {
+		reason := localDirectoryDaemonClaimBlockReason(resources, runtimeWithVersion("daemon-c", "9.9.9"))
+		if !strings.Contains(reason, "daemon-a, daemon-b") || !strings.Contains(reason, "daemon-c") {
+			t.Fatalf("reason = %q, want bound and claiming daemon ids", reason)
+		}
+	})
+
+	t.Run("blocks an unbound runtime", func(t *testing.T) {
+		reason := localDirectoryDaemonClaimBlockReason(resources, runtimeWithVersion("", "9.9.9"))
+		if !strings.Contains(reason, "cloud or unbound runtime") {
+			t.Fatalf("reason = %q, want unbound-runtime explanation", reason)
+		}
+	})
+
+	t.Run("fails closed for malformed resources", func(t *testing.T) {
+		reason := localDirectoryDaemonClaimBlockReason([]ProjectResourceData{{
+			ID: "bad", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"daemon_id":42}`),
+		}}, runtimeWithVersion("daemon-a", "9.9.9"))
+		if !strings.Contains(reason, "configuration is invalid") {
+			t.Fatalf("reason = %q, want corrupt-boundary explanation", reason)
+		}
+	})
+}
+
 // Worktree delivery metadata has to survive the whole way to the task row on
 // BOTH terminal paths. branch_name locates the commit, while durable_work_dir
 // records the directory that remains usable after the task worktree is gone.

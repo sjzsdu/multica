@@ -76,12 +76,11 @@ export type AgentColumnKey =
   | "model"
   | "created";
 
-/** Model and created are opt-in: hidden until the user enables them. Owner
- *  is shown by default (the user wants to see who owns each agent). */
-export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
-  "model",
-  "created",
-];
+/** Created is the only opt-in column: hidden until the user enables it.
+ *  Everything else shows by default — owner and access say who may manage
+ *  and invoke the agent, runtime and model say what it runs on; those are
+ *  the columns the list is scanned for. */
+export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = ["created"];
 
 export interface AgentsViewState {
   scope: AgentsScope;
@@ -166,6 +165,20 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       storage: createJSONStorage(() =>
         createWorkspaceAwareStorage(defaultStorage),
       ),
+      version: 1,
+      // v0 hid `model` by default, v1 shows it. Lift it out of every
+      // payload persisted at v0 once: a user who never touched the toggle
+      // carries ["model", "created"], and one who enabled it doesn't have
+      // "model" in the list at all (no-op). Columns the user hid stay hid;
+      // hiding model again is a toggle whose choice persists as before.
+      migrate: (persisted, version) => {
+        const p = (persisted ?? {}) as Partial<AgentsViewState>;
+        if (version >= 1 || !Array.isArray(p.hiddenColumns)) return p;
+        return {
+          ...p,
+          hiddenColumns: p.hiddenColumns.filter((key) => key !== "model"),
+        };
+      },
       partialize: (state) => ({
         scope: state.scope,
         sortField: state.sortField,

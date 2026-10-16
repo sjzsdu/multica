@@ -71,6 +71,101 @@ func memberCountDisplay(m map[string]any) string {
 	return strconv.Itoa(int(n))
 }
 
+func workflowPatchFromFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command) (map[string]any, error) {
+	patch := map[string]any{}
+	if cmd.Flags().Changed("workflow-mode") {
+		v, _ := cmd.Flags().GetString("workflow-mode")
+		patch["mode"] = v
+	}
+	if cmd.Flags().Changed("child-completion-signal") {
+		v, _ := cmd.Flags().GetString("child-completion-signal")
+		patch["child_completion_signal"] = v
+	}
+	if cmd.Flags().Changed("max-active-children") {
+		v, _ := cmd.Flags().GetInt("max-active-children")
+		patch["max_active_children"] = v
+	}
+	for _, name := range []string{"auto-promote-stage", "auto-finalize-parent", "require-tests", "require-review", "require-merge", "human-approval-required"} {
+		if cmd.Flags().Changed(name) {
+			v, _ := cmd.Flags().GetBool(name)
+			patch[nameToWorkflowKey(name)] = v
+		}
+	}
+	if cmd.Flags().Changed("merge-mode") {
+		v, _ := cmd.Flags().GetString("merge-mode")
+		patch["merge_mode"] = v
+	}
+	if err := applyPipelineFlags(ctx, client, cmd, patch); err != nil {
+		return nil, err
+	}
+	return patch, nil
+}
+
+// applyPipelineFlags adds the `pipeline` block to a workflow patch. The block is
+// replaced wholesale on the server, so it is only built when one of the two
+// flags is present: --pipeline-max-rounds alone restates the block without a
+// product agent (any squad member may verdict), and max rounds 0 clears the
+// block, which turns the verdict endpoint off again.
+func applyPipelineFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.Command, patch map[string]any) error {
+	roundsSet := cmd.Flags().Changed("pipeline-max-rounds")
+	agentSet := cmd.Flags().Changed("pipeline-product-agent")
+	if !roundsSet && !agentSet {
+		return nil
+	}
+	if !roundsSet {
+		return fmt.Errorf("--pipeline-max-rounds is required with --pipeline-product-agent; the pipeline block replaces the stored one")
+	}
+	rounds, _ := cmd.Flags().GetInt("pipeline-max-rounds")
+	if rounds < 0 {
+		return fmt.Errorf("--pipeline-max-rounds must be >= 0")
+	}
+	agent, _ := cmd.Flags().GetString("pipeline-product-agent")
+	if rounds == 0 {
+		if agent != "" {
+			return fmt.Errorf("--pipeline-product-agent requires --pipeline-max-rounds above 0")
+		}
+		patch["pipeline"] = nil
+		return nil
+	}
+	pipeline := map[string]any{"max_rounds": rounds}
+	if agent != "" {
+		agentID, err := resolveAgent(ctx, client, agent)
+		if err != nil {
+			return fmt.Errorf("resolve pipeline product agent: %w", err)
+		}
+		pipeline["product_agent_id"] = agentID
+	}
+	patch["pipeline"] = pipeline
+	return nil
+}
+
+func nameToWorkflowKey(name string) string {
+	keys := map[string]string{
+		"auto-promote-stage":      "auto_promote_stage",
+		"auto-finalize-parent":    "auto_finalize_parent",
+		"require-tests":           "require_tests",
+		"require-review":          "require_review",
+		"require-merge":           "require_merge",
+		"human-approval-required": "human_approval_required",
+	}
+	return keys[name]
+}
+
+func addSquadWorkflowFlags(cmd *cobra.Command) {
+	cmd.Flags().String("workflow-mode", "", "Workflow mode: manual, staged, or delivery")
+	cmd.Flags().String("child-completion-signal", "", "Child completion signal: terminal_only or review_ready")
+	cmd.Flags().Int("max-active-children", -1, "Maximum active child issues; 0 means unlimited")
+	cmd.Flags().Bool("auto-promote-stage", false, "Automatically promote the next stage")
+	cmd.Flags().Bool("auto-finalize-parent", false, "Automatically move the parent to in_review after final gates")
+	cmd.Flags().Bool("require-tests", false, "Require test evidence before delivery")
+	cmd.Flags().Bool("require-review", false, "Require reviewer approval before delivery")
+	cmd.Flags().Bool("require-merge", false, "Require merge before delivery")
+	cmd.Flags().String("merge-mode", "", "Merge mode: human, integrator, or pr_close_intent")
+	cmd.Flags().Bool("human-approval-required", false, "Require human approval before final delivery")
+	cmd.Flags().Int("pipeline-max-rounds", -1, "Pipeline rework rounds before the server escalates to a human; 0 turns the pipeline off. Replaces the stored pipeline block, so restate --pipeline-product-agent with it")
+	cmd.Flags().String("pipeline-product-agent", "", "Agent name or ID allowed to record pipeline verdicts (requires --pipeline-max-rounds above 0); empty lets any squad member verdict")
+}
+
 // ── Get ─────────────────────────────────────────────────────────────────────
 
 var squadGetCmd = &cobra.Command{
@@ -105,6 +200,17 @@ func runSquadGet(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Created:      %s\n", strVal(squad, "created_at"))
 	if inst := strVal(squad, "instructions"); inst != "" {
 		fmt.Printf("Instructions: %s\n", inst)
+	}
+	if workflow, ok := squad["workflow"].(map[string]any); ok {
+		fmt.Printf("Workflow:     %s (completion=%s, max_children=%v)\n",
+			strVal(workflow, "mode"), strVal(workflow, "child_completion_signal"), workflow["max_active_children"])
+		if pipeline, ok := workflow["pipeline"].(map[string]any); ok {
+			product := strVal(pipeline, "product_agent_id")
+			if product == "" {
+				product = "any squad member"
+			}
+			fmt.Printf("Pipeline:     max_rounds=%v, verdicts by %s\n", pipeline["max_rounds"], product)
+		}
 	}
 	return nil
 }
@@ -146,6 +252,13 @@ func runSquadCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
+	}
+	workflow, err := workflowPatchFromFlags(ctx, client, cmd)
+	if err != nil {
+		return err
+	}
+	if len(workflow) > 0 {
+		body["workflow"] = workflow
 	}
 
 	var result map[string]any
@@ -203,9 +316,16 @@ func runSquadUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("avatar-url")
 		body["avatar_url"] = v
 	}
+	workflow, err := workflowPatchFromFlags(ctx, client, cmd)
+	if err != nil {
+		return err
+	}
+	if len(workflow) > 0 {
+		body["workflow"] = workflow
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --name, --description, --instructions, --leader")
+		return fmt.Errorf("no fields to update; use flags like --name, --description, --instructions, --leader, or --workflow-mode")
 	}
 
 	var result map[string]any
@@ -516,6 +636,7 @@ func init() {
 	squadCreateCmd.Flags().String("description", "", "Squad description")
 	squadCreateCmd.Flags().String("leader", "", "Leader agent (name or ID) — required")
 	squadCreateCmd.Flags().String("output", "json", "Output format: table or json")
+	addSquadWorkflowFlags(squadCreateCmd)
 
 	// update
 	squadUpdateCmd.Flags().String("name", "", "New name")
@@ -524,6 +645,7 @@ func init() {
 	squadUpdateCmd.Flags().String("leader", "", "New leader agent (name or ID)")
 	squadUpdateCmd.Flags().String("avatar-url", "", "New avatar URL")
 	squadUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+	addSquadWorkflowFlags(squadUpdateCmd)
 
 	// delete
 	squadDeleteCmd.Flags().String("output", "table", "Output format: table or json")

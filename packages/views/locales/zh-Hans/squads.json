@@ -91,7 +91,8 @@
   },
   "detail_tabs": {
     "members": "成员",
-    "instructions": "指引"
+    "instructions": "指引",
+    "workflow": "工作流"
   },
   "details": {
     "leader": "队长",
@@ -125,6 +126,30 @@
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存",
     "placeholder": "例如：始终先编写失败测试。提交应保持小而独立。"
+  },
+  "workflow_tab": {
+    "title": "工作流策略",
+    "description": "控制小队如何推进子任务，以及何时收敛父任务。",
+    "mode_label": "模式",
+    "mode_manual": "手动",
+    "mode_staged": "分阶段",
+    "mode_delivery": "交付",
+    "max_active_children_label": "最大活动子任务数",
+    "unlimited_hint": "0 表示不限制。",
+    "auto_promote_label": "自动推进阶段",
+    "auto_promote_description": "当前阶段通过门禁后自动启动下一阶段。",
+    "auto_finalize_label": "自动将父任务移至待审核",
+    "auto_finalize_description": "所有阶段和门禁通过后将父任务移至待审核，不会自动标记为完成。",
+    "require_tests_label": "要求测试",
+    "require_tests_description": "推进前必须有通过的测试或检查信号。",
+    "require_review_label": "要求评审",
+    "require_review_description": "必须有评审信号或人工评审批准。",
+    "require_merge_label": "要求合并",
+    "require_merge_description": "必须已合并，或满足选定的合并策略。",
+    "human_approval_label": "要求人工审批",
+    "human_approval_description": "暂停工作流，直到成员批准该阶段。",
+    "changes_hint": "设置会应用于新的工作流推进和重试。",
+    "save_button": "保存"
   },
   "scope": {
     "mine": "我的",

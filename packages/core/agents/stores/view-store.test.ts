@@ -114,6 +114,67 @@ describe("useAgentsViewStore", () => {
     expect(filters.availability).toEqual(["online"]);
   });
 
+  describe("column default migration (v0 → v1)", () => {
+    it("lifts the old opt-in model default out of persisted hiddenColumns", async () => {
+      // v0 hid `model` by default, so every untouched payload carries it.
+      // v1 shows the column — rehydration must surface it once without a
+      // manual toggle.
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { hiddenColumns: ["model", "created"] },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "created",
+      ]);
+    });
+
+    it("keeps columns the user hid beyond the old default", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { hiddenColumns: ["model", "created", "owner"] },
+          version: 0,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "created",
+        "owner",
+      ]);
+    });
+
+    it("never re-applies to v1 payloads (a re-hidden model stays hidden)", async () => {
+      localStorage.setItem(
+        "multica_agents_view:acme",
+        JSON.stringify({
+          state: { hiddenColumns: ["model", "created"] },
+          version: 1,
+        }),
+      );
+
+      setCurrentWorkspace("acme", "ws_a");
+      await flush();
+      await flush();
+
+      expect(useAgentsViewStore.getState().hiddenColumns).toEqual([
+        "model",
+        "created",
+      ]);
+    });
+  });
+
   describe("access filter dimension", () => {
     it("toggleFilter('access', value) adds and removes the value", () => {
       const { toggleFilter } = useAgentsViewStore.getState();

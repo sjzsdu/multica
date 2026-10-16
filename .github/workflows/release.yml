@@ -82,12 +82,11 @@ jobs:
 
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
+    # No owner guard in this fork: the `brews` section was dropped from
+    # .goreleaser.yml, so there is no upstream Homebrew tap left to 401
+    # against and no HOMEBREW_TAP_GITHUB_TOKEN to provide. The job must run
+    # on every tag — the Desktop job below depends on it to create the
+    # GitHub Release that electron-builder uploads its installers to.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -114,7 +113,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
