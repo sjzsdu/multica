@@ -428,11 +428,12 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # Build the Desktop installers and upload them to the GitHub Release that
+  # the `release` job above just published. macOS builds currently run
+  # unsigned (ad-hoc signature, notarization skipped) because Apple Developer
+  # credentials are not wired into CI. Set APPLE_TEAM_ID + APPLE_ID +
+  # APPLE_APP_SPECIFIC_PASSWORD repo secrets and flip CSC_IDENTITY_AUTO_DISCOVERY
+  # to "true" below when signing/notarization is desired.
   desktop:
     needs: release
     strategy:
@@ -443,6 +444,8 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          - os: macos-latest
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -488,9 +491,10 @@ jobs:
           # Same-tag reruns must also replace Desktop assets after the
           # publisher's default two-hour safety window has elapsed.
           EP_GH_IGNORE_TIME: "true"
-          # Disable code signing on Linux/Windows for now — the public
-          # release is unsigned for these platforms, the CLI carries the
-          # trust boundary. Set CSC_LINK in repo secrets to enable
-          # Windows signing later.
+          # Disable automatic code-signing discovery across all platforms.
+          # Linux and Windows are unsigned by design; macOS builds currently
+          # use an ad-hoc signature (notarization skipped, see package.mjs).
+          # Set CSC_LINK / APPLE_TEAM_ID / APPLE_ID secrets to enable
+          # proper signing and notarization later.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
