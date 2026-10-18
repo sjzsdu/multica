@@ -1318,6 +1318,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
 		},
 		{
+			// Squad workflow rows carry no foreign key by project rule; sweep
+			// them before the squads and issues they reference are deleted.
+			name: "delete squad workflow data",
+			run:  func() error { return qtx.DeleteWorkspaceSquadWorkflowData(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete squads and skills",
 			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
 		},

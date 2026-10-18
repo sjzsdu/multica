@@ -129,12 +129,31 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `S3_REGION` | `us-west-2` | バケットのあるリージョン |
 | `AWS_ACCESS_KEY_ID` | SDK デフォルトの資格情報チェーン | 静的な access key |
 | `AWS_SECRET_ACCESS_KEY` | SDK デフォルトの資格情報チェーン | 静的な secret key |
-| `AWS_ENDPOINT_URL` | 空 | MinIO などの S3 互換 endpoint |
+| `AWS_ENDPOINT_URL` | 空 | MinIO、Tencent COS、Aliyun OSS などの S3 互換 endpoint |
 | `S3_USE_PATH_STYLE` | カスタム endpoint 時は `true` | path-style アドレスを使うか |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`、`cloudfront`、`presign`、`proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | 署名付きダウンロード URL の有効期間 |
 
 内部ネットワークの MinIO など、ブラウザから endpoint に直接到達できない場合は `ATTACHMENT_DOWNLOAD_MODE=proxy` を使ってください。
+
+Tencent COS と Aliyun OSS も同じ変数で利用できます:
+
+```dotenv
+# Tencent COS（virtual-hosted 形式。bucket 名に APPID サフィックスを含む）
+S3_BUCKET=my-bucket-1251234567
+S3_REGION=ap-guangzhou
+AWS_ENDPOINT_URL=https://cos.ap-guangzhou.myqcloud.com
+S3_USE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=<SecretId>
+AWS_SECRET_ACCESS_KEY=<SecretKey>
+
+# Aliyun OSS（署名には "oss-" プレフィックスなしの region ID を使う）
+S3_BUCKET=my-bucket
+S3_REGION=cn-hangzhou
+AWS_ENDPOINT_URL=https://oss-cn-hangzhou.aliyuncs.com
+AWS_ACCESS_KEY_ID=<AccessKeyId>
+AWS_SECRET_ACCESS_KEY=<AccessKeySecret>
+```
 
 ### ローカルディスク
 

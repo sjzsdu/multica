@@ -2057,11 +2057,12 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
 	const projectRepoRef = "release/v2"
+	const projectGitHubAccount = "secondary-user"
 	dbfx.Exec(t, `
 		INSERT INTO project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
-	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`)
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`","gh_account":"`+projectGitHubAccount+`"}`)
 
 	// Agent + runtime + queued task in this project.
 	var agentID, runtimeID string
@@ -2104,6 +2105,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if resp.Task.Repos[0].Ref != projectRepoRef {
 		t.Fatalf("project repo ref = %q, want %q", resp.Task.Repos[0].Ref, projectRepoRef)
+	}
+	if resp.Task.Repos[0].GitHubAccount != projectGitHubAccount {
+		t.Fatalf("project gh_account = %q, want %q", resp.Task.Repos[0].GitHubAccount, projectGitHubAccount)
 	}
 	for _, r := range resp.Task.Repos {
 		if strings.HasSuffix(r.URL, "workspace-repo-a") || strings.HasSuffix(r.URL, "workspace-repo-b") {
@@ -2314,6 +2318,14 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testi
 		"autopilot_run_id": runID,
 	})
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	// The project's local_directory resource binds its tasks to this daemon;
+	// the claim refuses a runtime that is not on it. Bind the fixture runtime
+	// for the duration of the test and restore the unbound state afterwards.
+	dbfx.Exec(t, `UPDATE agent_runtime SET daemon_id = 'test-daemon-claim' WHERE id = $1`, runtimeID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `UPDATE agent_runtime SET daemon_id = NULL WHERE id = $1`, runtimeID)
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,

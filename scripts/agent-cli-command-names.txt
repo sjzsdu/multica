@@ -10,10 +10,12 @@ dim
 dsh
 grok
 hermes
+jcode
 kimi
 kiro-cli
 mcode
 omp
+openclaude
 openclaw
 opencode
 pi

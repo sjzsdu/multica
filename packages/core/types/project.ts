@@ -71,13 +71,15 @@ export interface ListProjectsResponse {
 // Known types (UI must default-case unknown server-side additions):
 //   - github_repo: cloud-side git checkout, ref = { url, ref?, default_branch_hint? }
 //   - local_directory: agent execution on a specific daemon,
-//     ref = { local_path, daemon_id, label?, execution_mode? }
+//     ref = { local_path, daemon_id, label?, execution_mode?, sparse_paths? }
 export type ProjectResourceType = "github_repo" | "local_directory";
 
 export interface GithubRepoResourceRef {
   url: string;
   ref?: string;
   default_branch_hint?: string;
+  /** Optional local `gh` account name to use for this project's PR operations. */
+  gh_account?: string;
 }
 
 /**
@@ -105,6 +107,8 @@ export interface LocalDirectoryResourceRef {
   daemon_id: string;
   label?: string;
   execution_mode?: LocalDirectoryExecutionMode;
+  /** Relative paths to sparse-checkout when execution_mode is worktree. */
+  sparse_paths?: string[];
 }
 
 export type ProjectResourceRef =

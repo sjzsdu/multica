@@ -258,3 +258,63 @@ These actions can trigger agent work or mutate durable state:
 - Getting the leader briefing does NOT imply status authority. A squad
   `@`-mentioned into an issue assigned to someone else is a guest: roster and
   delegation rules yes, `multica issue status` no.
+
+## Squad workflow policy
+
+The squad's `workflow` configuration controls coordination semantics; it is
+not just leader instructions. The default is backwards-compatible:
+`mode=manual`, `child_completion_signal=terminal_only`, and human-controlled
+merge/approval.
+
+Configure it with the CLI when a squad needs more autonomous delivery:
+
+```bash
+multica squad update <squad-id> \
+  --workflow-mode staged \
+  --child-completion-signal review_ready \
+  --max-active-children 2 \
+  --auto-promote-stage \
+  --auto-finalize-parent \
+  --require-tests \
+  --require-review
+```
+
+Supported modes are `manual`, `staged`, and `delivery`. `review_ready` treats
+the normal agent hand-off (`in_review`) as the stage signal and wakes the
+parent leader once the stage barrier is ready. It does not mark the parent
+done or bypass tests, review, merge, or human approval. Those gates remain
+explicit policy fields and must be evidenced before the parent moves to
+`in_review`. `max_active_children` limits active work for both child creation
+and backlog-to-active promotion under the workspace transaction lock.
+`auto_promote_stage` promotes the next stage's backlog children after the
+coordinator gates pass; if capacity is full, remaining children stay in
+backlog for a later retry. Set `human_approval_required=false` when a fully
+unattended delivery path is intended; it defaults to true.
+`auto_finalize_parent` is a separate opt-in: after the final barrier and all
+gates pass, it moves the parent to `in_review`; it never moves a parent to
+`done`, which remains a human/integration decision.
+
+Each closed stage barrier is also recorded in `squad_workflow_run`. The server
+uses a leased retry worker to revisit pending or blocked runs after capacity
+is freed or provider snapshots change, so a transient failure does not require
+another child status transition to restart the workflow.
+
+Workflow runs are readable from `GET /api/issues/<parent-id>/workflow-runs`.
+A human reviewer can record or revoke the review/final-approval gate with
+`POST /api/issues/<parent-id>/workflow-runs/<run-id>/approvals`; the request
+must come from a human actor and the durable approval wakes the retry worker.
+
+The completion decision itself is centralized in the persistence-neutral
+workflow coordinator. External CI, PR, review, and approval systems should be
+implemented as `GateEvaluator` adapters instead of adding provider-specific
+branches to the issue handlers. The current handler already consumes mirrored
+GitHub check and merge snapshots for the test/merge gates; review and human
+approval remain fail-closed until their evidence providers are added.
+
+## References
+
+For source paths, tests, edge cases, and exact routing details, see:
+
+```text
+references/squad-source-map.md
+```

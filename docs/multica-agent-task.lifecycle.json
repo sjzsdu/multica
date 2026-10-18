@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Multica Agent Task 生命周期",
+    "output": "multica-agent-task.lifecycle.html",
+    "quality_profile": "showcase",
+    "viewBox": [1200, 700],
+    "views": [
+      { "id": "main-lifecycle", "label": "主生命周期", "focus": ["queued", "dispatched", "running", "completed"], "note": "从入队、派发、执行到完成的主状态轨道。" },
+      { "id": "waiting-path", "label": "等待路径", "focus": ["running", "waiting-local"], "note": "本地目录等资源等待不会直接结束任务。" },
+      { "id": "failure-path", "label": "失败与终止", "focus": ["running", "failed", "retry-queued", "expired", "cancelled"], "note": "区分可恢复失败、排队过期和用户取消。" }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "任务主状态" },
+    { "id": "waiting", "label": "资源等待" },
+    { "id": "recovery", "label": "恢复循环" },
+    { "id": "terminal", "label": "终止状态" }
+  ],
+  "states": [
+    { "id": "queued", "type": "start", "label": "Queued", "sublabel": "等待 runtime", "lane": "main", "col": 0, "step": "01", "tag": "agent_task_queue" },
+    { "id": "dispatched", "type": "active", "label": "Dispatched", "sublabel": "已分配 runtime", "lane": "main", "col": 1, "step": "02", "tag": "daemon claim" },
+    { "id": "running", "type": "active", "label": "Running", "sublabel": "执行 agent turn", "lane": "main", "col": 2, "step": "03", "tag": "status:running" },
+    { "id": "completed", "type": "success", "label": "Completed", "sublabel": "结果已提交", "lane": "main", "col": 4, "step": "04", "tag": "terminal" },
+    { "id": "waiting-local", "type": "waiting", "label": "Local Wait", "sublabel": "waiting_local_directory", "lane": "waiting", "col": 2, "yOffset": 40, "width": 150, "tag": "等待本地目录" },
+    { "id": "failed", "type": "failure", "label": "Failed", "sublabel": "可恢复错误", "lane": "recovery", "col": 0, "yOffset": 90, "tag": "failure_reason" },
+    { "id": "retry-queued", "type": "active", "label": "Retry Queued", "sublabel": "重新排队", "lane": "recovery", "col": 2, "yOffset": 240, "tag": "retry" },
+    { "id": "expired", "type": "failure", "label": "Queued Expired", "sublabel": "排队超时", "lane": "terminal", "col": 2, "tag": "queued_expired" },
+    { "id": "cancelled", "type": "failure", "label": "Cancelled", "sublabel": "用户取消", "lane": "terminal", "col": 1, "tag": "terminal" }
+  ],
+  "transitions": [
+    { "id": "queue-dispatch", "from": "queued", "to": "dispatched", "variant": "emphasis", "route": "straight" },
+    { "id": "dispatch-running", "from": "dispatched", "to": "running", "variant": "emphasis", "route": "straight" },
+    { "id": "run-complete", "from": "running", "to": "completed", "variant": "emphasis", "route": "straight" },
+    { "id": "run-wait", "from": "running", "to": "waiting-local", "variant": "default", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "wait-running", "from": "waiting-local", "to": "running", "variant": "emphasis", "route": "drop", "fromSide": "top", "toSide": "bottom" },
+    { "id": "run-fail", "from": "running", "to": "failed", "variant": "security", "fromSide": "left", "toSide": "left", "via": [[390, 157], [390, 560], [20, 560], [20, 397]] }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "主轨道", "items": ["Queued → Dispatched → Running → Completed", "Daemon 领取后才进入执行态", "Completed 是持久化结果，不只是 UI 状态"] },
+    { "dot": "amber", "title": "等待与恢复", "items": ["waiting_local_directory 不等于失败", "恢复后回到 Running 继续执行", "Failed 只有在预算允许时重新排队"] },
+    { "dot": "rose", "title": "终止语义", "items": ["queued_expired 表示任务从未开始即过期", "Cancelled 表示用户主动终止", "终止态不再回到执行轨道"] }
+  ]
+}

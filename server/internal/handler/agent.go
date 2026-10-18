@@ -302,9 +302,10 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description,omitempty"`
-	Ref         string `json:"ref,omitempty"`
+	URL           string `json:"url"`
+	Description   string `json:"description,omitempty"`
+	Ref           string `json:"ref,omitempty"`
+	GitHubAccount string `json:"gh_account,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a

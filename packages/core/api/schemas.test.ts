@@ -74,6 +74,12 @@ import {
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
+import {
+  StorageMigrationStatusSchema,
+  StartStorageMigrationResponseSchema,
+  EMPTY_STORAGE_MIGRATION_STATUS,
+  EMPTY_START_STORAGE_MIGRATION_RESPONSE,
+} from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -2258,6 +2264,60 @@ describe("issue status catalog schemas", () => {
       { endpoint: "POST /api/issue-statuses" },
     );
     expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
+  });
+});
+
+describe("storage migration status schemas", () => {
+  it("parses a full status response", () => {
+    const parsed = StorageMigrationStatusSchema.parse({
+      available: true,
+      pending: { pending_attachments: 2, pending_avatars: 1 },
+      state: {
+        running: true,
+        total: 3,
+        migrated: 1,
+        failed: 0,
+        local_cleaned: 1,
+        failures: [],
+        dropped_failures: 0,
+        started_at: "2026-10-18T00:00:00Z",
+      },
+    });
+    expect(parsed.available).toBe(true);
+    expect(parsed.pending?.pending_attachments).toBe(2);
+    expect(parsed.state?.running).toBe(true);
+  });
+
+  it("falls back to unavailable on a malformed response", () => {
+    const parsed = parseWithFallback(
+      { available: "yes", pending: "lots" },
+      StorageMigrationStatusSchema,
+      EMPTY_STORAGE_MIGRATION_STATUS,
+      { endpoint: "GET /api/storage-migration" },
+    );
+    expect(parsed).toEqual(EMPTY_STORAGE_MIGRATION_STATUS);
+  });
+
+  it("defaults counters when an older server omits them", () => {
+    const parsed = StorageMigrationStatusSchema.parse({ available: true });
+    expect(parsed.state).toBeUndefined();
+  });
+});
+
+describe("start storage migration response schema", () => {
+  it("parses the accepted response", () => {
+    const parsed = StartStorageMigrationResponseSchema.parse({ started: true });
+    expect(parsed).toEqual({ started: true });
+  });
+
+  it("falls back when the body is malformed", () => {
+    const parsed = parseWithFallback(
+      { started: "yep" },
+      StartStorageMigrationResponseSchema,
+      EMPTY_START_STORAGE_MIGRATION_RESPONSE,
+      { endpoint: "POST /api/storage-migration" },
+    );
+    expect(parsed).toEqual(EMPTY_START_STORAGE_MIGRATION_RESPONSE);
   });
 });
 

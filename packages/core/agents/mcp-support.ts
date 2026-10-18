@@ -7,6 +7,7 @@
 // config for CLIs that do not receive it through ExecOptions.
 const MCP_SUPPORTED_PROVIDERS = new Set([
   "claude",
+  "openclaude",
   "codebuddy",
   "codearts",
   "codex",

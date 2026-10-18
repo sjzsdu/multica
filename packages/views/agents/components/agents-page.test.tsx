@@ -1,7 +1,12 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
+import { fireEvent, screen } from "@testing-library/react";
+import { toast } from "sonner";
+import type {
+  Agent,
+  AgentRuntime,
+  RuntimeModelsResult,
+} from "@multica/core/types";
 import type { AgentActivity } from "@multica/core/agents";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { renderWithI18n } from "../../test/i18n";
@@ -30,11 +35,18 @@ const mocks = vi.hoisted(() => ({
     byAgent: new Map<string, unknown>(),
     loading: false,
   },
+  runtimes: [] as AgentRuntime[],
+  runtimeModels: {
+    models: [],
+    unavailableModels: [],
+    supported: true,
+  } as RuntimeModelsResult,
+  updateAgentMutate: vi.fn(),
   viewState: {
     scope: "all",
     sortField: "lastActive" as string,
     sortDirection: "desc" as string,
-    hiddenColumns: ["model", "created"] as string[],
+    hiddenColumns: ["created"] as string[],
     filters: {
       availability: [] as string[],
       runtimes: [] as string[],
@@ -66,9 +78,34 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agent-run-counts") {
       return { data: mocks.runCounts, isPending: mocks.runCountsPending };
     }
+    if (key === "runtimes") {
+      return { data: mocks.runtimes, isLoading: false, isPending: false };
+    }
+    if (key === "runtime-models") {
+      return {
+        data: mocks.runtimeModels,
+        isSuccess: true,
+        isLoading: false,
+        isPending: false,
+      };
+    }
     return { data: [], isLoading: false, isPending: false };
   },
+  // Anything else building a mutation observer in this tree; the inline
+  // cells go through the mocked agents/mutations hook below.
+  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+}));
+
+// Inline runtime/model cells write through the shared optimistic hook;
+// capture the mutate calls here. The hook's cache rules (optimistic patch,
+// field-scoped rollback, settle-time invalidation) run for real and are
+// pinned in agent-detail-page.test.
+vi.mock("@multica/core/agents/mutations", () => ({
+  useUpdateAgent: () => ({
+    mutate: mocks.updateAgentMutate,
+    isPending: false,
+  }),
 }));
 
 // The list virtualizes; render every row so DOM order reflects sort order.
@@ -108,7 +145,7 @@ vi.mock("@multica/core/agents", () => ({
 vi.mock("@multica/core/agents/stores", () => ({
   useAgentsViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.viewState),
-  AGENT_DEFAULT_HIDDEN_COLUMNS: ["model", "created"],
+  AGENT_DEFAULT_HIDDEN_COLUMNS: ["created"],
   AGENT_SCOPES: ["mine", "all", "archived"],
 }));
 
@@ -139,8 +176,18 @@ vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  // Partial mock: the runtime picker's machine builder pulls helpers this
+  // test doesn't care about (e.g. deriveRuntimeHealth); override only the
+  // query hooks and labels the tests pin.
+  ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+  runtimeModelsOptions: (runtimeId: string | null) => ({
+    queryKey: ["runtime-models", runtimeId],
+  }),
+  refreshRuntimeModels: vi.fn(),
+  isRuntimeUsableForUser: () => true,
+  runtimeDisplayLabel: (runtime: { name: string }) => runtime.name,
 }));
 
 // View-layer children with heavy / portal deps — stub to keep the test focused
@@ -205,6 +252,32 @@ function activityLastActive(daysAgo: number): AgentActivity {
 const ALPHA = makeAgent({ id: "a-alpha", name: "Alpha Agent" });
 const BETA = makeAgent({ id: "a-beta", name: "Beta Agent" });
 
+// One machine with two runtimes: rebinding needs a different runtime to
+// select, and `BASE_AGENT.runtime_id` points at the Claude one.
+const RT_CLAUDE: AgentRuntime = {
+  id: "runtime-1",
+  workspace_id: "workspace-1",
+  daemon_id: "daemon-1",
+  name: "Claude (mbp.local)",
+  runtime_mode: "local",
+  provider: "claude",
+  launch_header: "",
+  status: "online",
+  device_info: "mbp.local · macOS (arm64)",
+  metadata: {},
+  owner_id: "user-1",
+  visibility: "public",
+  last_seen_at: "2026-09-30T00:00:00Z",
+  created_at: "2026-06-01T00:00:00Z",
+  updated_at: "2026-06-01T00:00:00Z",
+};
+const RT_CODEX: AgentRuntime = {
+  ...RT_CLAUDE,
+  id: "runtime-2",
+  name: "Codex (mbp.local)",
+  provider: "codex",
+};
+
 function makeAdapter(
   overrides: Partial<NavigationAdapter> = {},
 ): NavigationAdapter {
@@ -220,13 +293,17 @@ function makeAdapter(
   };
 }
 
-function renderPage(locale?: SupportedLocale) {
+function renderPage(
+  locale?: SupportedLocale,
+  adapter: NavigationAdapter = makeAdapter(),
+) {
   renderWithI18n(
-    <NavigationProvider value={makeAdapter()}>
+    <NavigationProvider value={adapter}>
       <AgentsPage />
     </NavigationProvider>,
     { locale },
   );
+  return adapter;
 }
 
 /** Beta before Alpha in document order? */
@@ -245,10 +322,17 @@ beforeEach(() => {
   mocks.runCountsPending = false;
   mocks.activity = { byAgent: new Map(), loading: false };
   mocks.presence = { byAgent: new Map(), loading: false };
+  mocks.runtimes = [];
+  mocks.runtimeModels = {
+    models: [],
+    unavailableModels: [],
+    supported: true,
+  };
+  mocks.updateAgentMutate.mockReset();
   mocks.viewState.scope = "all";
   mocks.viewState.sortField = "lastActive";
   mocks.viewState.sortDirection = "desc";
-  mocks.viewState.hiddenColumns = ["model", "created"];
+  mocks.viewState.hiddenColumns = ["created"];
   mocks.viewState.filters = {
     availability: [],
     runtimes: [],
@@ -346,5 +430,127 @@ describe("AgentsPage docs link", () => {
     expect(
       screen.getByRole("link", { name: "En savoir plus →" }),
     ).toHaveAttribute("href", "https://multica.ai/docs/fr/agents");
+  });
+});
+
+describe("AgentsPage inline runtime/model editing", () => {
+  // A single row keeps every trigger query unique across both columns.
+  const CATALOG: RuntimeModelsResult = {
+    models: [{ id: "claude-fable-5", label: "Fable", provider: "anthropic" }],
+    unavailableModels: [],
+    supported: true,
+  };
+
+  it("shows the model column with labelled triggers for both editable cells", () => {
+    mocks.agents = [ALPHA];
+    mocks.runtimes = [RT_CLAUDE, RT_CODEX];
+
+    renderPage();
+
+    expect(
+      screen.getByRole("button", { name: /^Runtime · Claude/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Model · claude" }),
+    ).toBeInTheDocument();
+  });
+
+  it("rebinds the runtime with model/thinking/tier cleared in one payload", async () => {
+    mocks.agents = [ALPHA];
+    mocks.runtimes = [RT_CLAUDE, RT_CODEX];
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: /^Runtime · Claude/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Codex/ }));
+
+    expect(mocks.updateAgentMutate).toHaveBeenCalledTimes(1);
+    expect(mocks.updateAgentMutate).toHaveBeenCalledWith(
+      {
+        id: ALPHA.id,
+        data: {
+          runtime_id: "runtime-2",
+          model: "",
+          thinking_level: "",
+          service_tier: "",
+        },
+      },
+      expect.anything(),
+    );
+  });
+
+  it("changes the model from the list", async () => {
+    mocks.agents = [ALPHA];
+    mocks.runtimes = [RT_CLAUDE];
+    mocks.runtimeModels = CATALOG;
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Model · claude" }));
+    fireEvent.click(await screen.findByText("Fable"));
+
+    expect(mocks.updateAgentMutate).toHaveBeenCalledWith(
+      { id: ALPHA.id, data: { model: "claude-fable-5" } },
+      expect.anything(),
+    );
+  });
+
+  it("keeps the cells read-only for rows the user cannot manage", () => {
+    // Not the owner, and the empty member list means no admin role.
+    mocks.agents = [makeAgent({ id: "a-readonly", owner_id: "user-other" })];
+    mocks.runtimes = [RT_CLAUDE];
+
+    renderPage();
+
+    expect(
+      screen.queryByRole("button", { name: /^Runtime · / }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Model · / }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("claude").closest("button")).toBeNull();
+    expect(screen.getByText("Claude (mbp.local)").closest("button")).toBeNull();
+  });
+
+  it("keeps a cell click from navigating the row", () => {
+    mocks.agents = [ALPHA];
+    mocks.runtimes = [RT_CLAUDE];
+    const adapter = renderPage();
+
+    // Baseline: the row itself navigates.
+    fireEvent.click(screen.getByText("Alpha Agent"));
+    expect(adapter.push).toHaveBeenCalledWith("/test-workspace/agents/a-alpha");
+
+    // A cell click must not reach the row's handler.
+    fireEvent.click(screen.getByRole("button", { name: "Model · claude" }));
+    expect(adapter.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the model cell when the user hid the column", () => {
+    mocks.agents = [ALPHA];
+    mocks.viewState.hiddenColumns = ["model", "created"];
+
+    renderPage();
+
+    expect(
+      screen.queryByRole("button", { name: /^Model · / }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("claude")).not.toBeInTheDocument();
+  });
+
+  it("toasts the shared failure message when an update is rejected", async () => {
+    mocks.agents = [ALPHA];
+    mocks.runtimes = [RT_CLAUDE];
+    mocks.runtimeModels = CATALOG;
+    vi.mocked(toast.error).mockClear();
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Model · claude" }));
+    fireEvent.click(await screen.findByText("Fable"));
+
+    const callbacks = mocks.updateAgentMutate.mock.calls.at(-1)?.[1] as {
+      onError: (error: Error) => void;
+    };
+    callbacks.onError(new Error(""));
+
+    expect(toast.error).toHaveBeenCalledWith("Failed to update agent");
   });
 });

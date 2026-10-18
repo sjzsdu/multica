@@ -29,6 +29,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -313,6 +314,61 @@ func (h *Handler) broadcastCancelledWakeups(ctx context.Context, workspaceID pgt
 	if len(cancelled) > 0 {
 		h.TaskService.BroadcastCancelledTasks(ctx, uuidToString(workspaceID), cancelled)
 	}
+}
+
+// runWithWorkflowCapacityGuard serializes a child promotion or re-parenting
+// with other workflow-capacity writes. Ordinary issue updates retain the
+// lighter status guard above.
+func (h *Handler) runWithWorkflowCapacityGuard(ctx context.Context, workspaceID, issueID pgtype.UUID, statusKey string, targetParentID pgtype.UUID, fn func(q *db.Queries) error) error {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := h.Queries.WithTx(tx)
+	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
+		return err
+	}
+	if _, err := qtx.LockWorkspaceForWorkflowCapacity(ctx, workspaceID); err != nil {
+		return fmt.Errorf("lock workspace for workflow capacity: %w", err)
+	}
+	current, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
+	if err != nil {
+		return err
+	}
+	if err := h.checkWorkflowCapacity(ctx, qtx, current, statusKey, targetParentID); err != nil {
+		return err
+	}
+	if err := fn(qtx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (h *Handler) checkWorkflowCapacity(ctx context.Context, q *db.Queries, current db.Issue, targetStatus string, targetParentID pgtype.UUID) error {
+	previous := issuestatus.Effective(ctx, q, current.WorkspaceID, current.Status)
+	target := previous
+	if targetStatus != "" {
+		target = issuestatus.Effective(ctx, q, current.WorkspaceID, targetStatus)
+	}
+	reparenting := targetParentID.Valid && targetParentID != current.ParentIssueID
+	if !reparenting {
+		targetParentID = current.ParentIssueID
+		if !targetParentID.Valid || !squadworkflow.IsActiveChildStatus(target) || squadworkflow.IsActiveChildStatus(previous) {
+			return nil
+		}
+	}
+	if !targetParentID.Valid || !squadworkflow.IsActiveChildStatus(target) {
+		return nil
+	}
+	parent, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: targetParentID, WorkspaceID: current.WorkspaceID,
+	})
+	if err != nil {
+		return nil
+	}
+	return service.CheckActiveChildCapacity(ctx, q, parent, target, current.ID)
 }
 
 // writeIssueStatusRaceError renders errIssueStatusArchivedRace as a 409 and
@@ -3519,6 +3575,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueLimitReached(w, err) {
 		return
 	}
+	if errors.Is(err, service.ErrActiveChildrenLimitExceeded) {
+		writeError(w, http.StatusConflict, "the parent squad has reached its maximum active-child limit; wait for an active child to finish or increase the squad limit")
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -3675,7 +3735,7 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workflowCapacityGuard bool, targetParentID pgtype.UUID) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3691,6 +3751,11 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	// must precede both attachment and issue row locks everywhere. (MUL-6243)
 	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
 		return db.Issue{}, db.Issue{}, false, err
+	}
+	if workflowCapacityGuard {
+		if _, err := qtx.LockWorkspaceForWorkflowCapacity(ctx, workspaceID); err != nil {
+			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock workspace for workflow capacity: %w", err)
+		}
 	}
 	if len(attachmentIDs) > 0 {
 		if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
@@ -3743,6 +3808,15 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		params.Description = pgtype.Text{
 			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
 			Valid:  true,
+		}
+	}
+	if workflowCapacityGuard {
+		statusKey := ""
+		if params.Status.Valid {
+			statusKey = params.Status.String
+		}
+		if err := h.checkWorkflowCapacity(ctx, qtx, current, statusKey, targetParentID); err != nil {
+			return db.Issue{}, current, false, err
 		}
 	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields)
@@ -4040,14 +4114,29 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 	var issue db.Issue
 	attachmentsChanged := false
+	parentChanged := false
+	if _, touched := rawFields["parent_issue_id"]; touched {
+		parentChanged = params.ParentIssueID.Valid && params.ParentIssueID != prevIssue.ParentIssueID
+	}
+	workflowCapacityGuard := (req.Status != nil && prevIssue.ParentIssueID.Valid) || parentChanged
+	targetParentID := pgtype.UUID{}
+	if parentChanged {
+		targetParentID = params.ParentIssueID
+	}
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, workflowCapacityGuard, targetParentID,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
 		}
+	} else if workflowCapacityGuard {
+		err = h.runWithWorkflowCapacityGuard(r.Context(), prevIssue.WorkspaceID, prevIssue.ID, statusKeyForGuard, targetParentID, func(q *db.Queries) error {
+			var innerErr error
+			issue, innerErr = q.UpdateIssue(r.Context(), params)
+			return innerErr
+		})
 	} else {
 		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
 	}
@@ -4056,6 +4145,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if writeDuplicateMarkError(w, err) {
+			return
+		}
+		if errors.Is(err, service.ErrActiveChildrenLimitExceeded) {
+			writeError(w, http.StatusConflict, "the parent squad has reached its maximum active-child limit; wait for an active child to finish or increase the squad limit")
 			return
 		}
 		if errors.Is(err, errIssueFieldConflict) {
@@ -4864,17 +4957,32 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 		var issue db.Issue
+		parentChanged := false
+		if _, touched := rawUpdates["parent_issue_id"]; touched {
+			parentChanged = params.ParentIssueID.Valid && params.ParentIssueID != prevIssue.ParentIssueID
+		}
+		workflowCapacityGuard := (req.Updates.Status != nil && prevIssue.ParentIssueID.Valid) || parentChanged
+		targetParentID := pgtype.UUID{}
+		if parentChanged {
+			targetParentID = params.ParentIssueID
+		}
 		if req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, issueStatusGuard,
+				writeCtx, prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, issueStatusGuard, workflowCapacityGuard, targetParentID,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
 			}
+		} else if workflowCapacityGuard {
+			err = h.runWithWorkflowCapacityGuard(r.Context(), prevIssue.WorkspaceID, prevIssue.ID, batchStatusKey, targetParentID, func(q *db.Queries) error {
+				var innerErr error
+				issue, innerErr = q.UpdateIssue(r.Context(), params)
+				return innerErr
+			})
 		} else {
 			issue, err = h.updateIssueWithStatusGuard(writeCtx, wsUUID, issueStatusGuard, params)
 		}
@@ -4884,6 +4992,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// same way. Abort with 409 instead of reporting a partial update.
 			if writeIssueStatusRaceError(w, err) {
 				return
+			}
+			if errors.Is(err, service.ErrActiveChildrenLimitExceeded) {
+				slog.Info("batch update skipped child at workflow capacity", "issue_id", issueID)
+				continue
 			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
 			continue

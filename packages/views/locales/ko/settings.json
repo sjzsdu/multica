@@ -733,6 +733,13 @@
     "usage_help": "사용 방법"
   },
   "workspace": {
+    "storage_section": "스토리지",
+    "storage_migration_label": "로컬 파일 마이그레이션",
+    "storage_migration_pending": "첨부 파일 {{attachments}}개와 아바타 {{avatars}}개가 아직 이 서버의 로컬 디스크에 있습니다.",
+    "storage_migration_running": "오브젝트 스토리지로 이동 중… {{migrated}}개 이동, {{failed}}개 실패.",
+    "storage_migration_finished": "파일 {{migrated}}개를 오브젝트 스토리지로 이동했습니다. {{failed}}개 실패.",
+    "storage_migration_start": "파일 마이그레이션",
+    "storage_migration_start_failed": "스토리지 마이그레이션을 시작하지 못했습니다.",
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",

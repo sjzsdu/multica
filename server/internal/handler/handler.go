@@ -39,6 +39,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -215,6 +216,13 @@ type Handler struct {
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
+	// WorkflowCoordinator is the pure workflow decision engine. It is a value
+	// field so tests and future deployments can inject a gate evaluator without
+	// changing HTTP handlers or persistence code.
+	WorkflowCoordinator squadworkflow.Coordinator
+	// WorkflowRetryWorker replays durable stage barriers that were blocked by
+	// capacity, provider gates, or a transient request failure.
+	WorkflowRetryWorker *WorkflowRetryWorker
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
@@ -238,8 +246,12 @@ type Handler struct {
 	LivenessStore      LivenessStore
 	HeartbeatScheduler HeartbeatScheduler
 	Storage            storage.Storage
-	CFSigner           *auth.CloudFrontSigner
-	Analytics          analytics.Client
+	// StorageMigrator copies objects left behind on local disk up to the
+	// configured object store (self-hosted local→S3 cutover). Nil unless S3
+	// is configured; the status endpoint reports that as available=false.
+	StorageMigrator *service.StorageMigrator
+	CFSigner        *auth.CloudFrontSigner
+	Analytics       analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -497,6 +509,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		WorkflowCoordinator:          squadworkflow.NewCoordinator(nil),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
@@ -519,6 +532,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LLM: llmClient,
 		cfg: cfg,
 	}
+	h.WorkflowRetryWorker = NewWorkflowRetryWorker(h)
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.

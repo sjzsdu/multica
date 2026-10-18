@@ -129,12 +129,31 @@ Lorsque `S3_BUCKET` n'est pas défini, Multica utilise le disque local.
 | `S3_REGION` | `us-west-2` | Région où se trouve le bucket |
 | `AWS_ACCESS_KEY_ID` | chaîne d'identifiants par défaut du SDK | Clé d'accès statique |
 | `AWS_SECRET_ACCESS_KEY` | chaîne d'identifiants par défaut du SDK | Clé secrète statique |
-| `AWS_ENDPOINT_URL` | vide | Point de terminaison compatible S3, comme MinIO |
+| `AWS_ENDPOINT_URL` | vide | Point de terminaison compatible S3, comme MinIO, Tencent COS ou Aliyun OSS |
 | `S3_USE_PATH_STYLE` | `true` avec un point de terminaison personnalisé | Utiliser ou non l'adressage de type chemin (path-style) |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign` ou `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Durée de vie des URL de téléchargement signées |
 
 Utilisez `ATTACHMENT_DOWNLOAD_MODE=proxy` lorsque le point de terminaison — un MinIO interne, par exemple — n'est pas accessible depuis le navigateur.
+
+Tencent COS et Aliyun OSS utilisent les mêmes variables :
+
+```dotenv
+# Tencent COS (style virtual-hosted ; le nom du bucket inclut le suffixe APPID)
+S3_BUCKET=my-bucket-1251234567
+S3_REGION=ap-guangzhou
+AWS_ENDPOINT_URL=https://cos.ap-guangzhou.myqcloud.com
+S3_USE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=<SecretId>
+AWS_SECRET_ACCESS_KEY=<SecretKey>
+
+# Aliyun OSS (région de signature sans le préfixe "oss-")
+S3_BUCKET=my-bucket
+S3_REGION=cn-hangzhou
+AWS_ENDPOINT_URL=https://oss-cn-hangzhou.aliyuncs.com
+AWS_ACCESS_KEY_ID=<AccessKeyId>
+AWS_SECRET_ACCESS_KEY=<AccessKeySecret>
+```
 
 ### Disque local
 

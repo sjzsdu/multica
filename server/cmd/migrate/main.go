@@ -141,6 +141,11 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
 	"563_search_index_change_changed_at_index":                  "idx_search_index_change_changed_at",
+	"434_squad_workflow_policy_squad_idx":                       "squad_workflow_policy_squad_uidx",
+	"436_squad_workflow_run_parent_stage_idx":                   "squad_workflow_run_parent_stage_uidx",
+	"573_squad_workflow_run_id_idx":                             "squad_workflow_run_id_uidx",
+	"575_squad_workflow_approval_key_idx":                       "squad_workflow_approval_key_uidx",
+	"576_squad_workflow_approval_id_idx":                        "squad_workflow_approval_id_uidx",
 	"562_search_index_change_workspace_index":                   "idx_search_index_change_workspace_xid",
 	"552_agent_task_history_page_index":                         "idx_agent_task_queue_history_page",
 	"535_github_pr_address_index":                               "idx_github_pull_request_pr_owner_repo",
