@@ -246,8 +246,12 @@ type Handler struct {
 	LivenessStore      LivenessStore
 	HeartbeatScheduler HeartbeatScheduler
 	Storage            storage.Storage
-	CFSigner           *auth.CloudFrontSigner
-	Analytics          analytics.Client
+	// StorageMigrator copies objects left behind on local disk up to the
+	// configured object store (self-hosted local→S3 cutover). Nil unless S3
+	// is configured; the status endpoint reports that as available=false.
+	StorageMigrator *service.StorageMigrator
+	CFSigner        *auth.CloudFrontSigner
+	Analytics       analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the

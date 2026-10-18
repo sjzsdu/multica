@@ -729,6 +729,13 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "storage_section": "存储",
+    "storage_migration_label": "本地文件迁移",
+    "storage_migration_pending": "还有 {{attachments}} 个附件和 {{avatars}} 个头像保存在服务器本地磁盘上。",
+    "storage_migration_running": "正在迁移到对象存储……已迁移 {{migrated}} 个，失败 {{failed}} 个。",
+    "storage_migration_finished": "已将 {{migrated}} 个文件迁移到对象存储，失败 {{failed}} 个。",
+    "storage_migration_start": "迁移文件",
+    "storage_migration_start_failed": "启动存储迁移失败。",
     "section_general": "工作区信息",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",

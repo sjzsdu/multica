@@ -448,6 +448,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	// Local→S3 storage migration worker. Only meaningful when S3 is the
+	// active backend and the operator explicitly opts in (SaaS disables it
+	// by default — an instance-wide scan has no rows to migrate there).
+	// Routing is gated behind the same flag below, so a disabled flag keeps
+	// the handler field nil and the route absent, end-to-end.
+	if s3 != nil && envBool("MULTICA_STORAGE_MIGRATION_ENABLED", false) {
+		if local := storage.NewLocalStorageFromEnv(); local != nil {
+			h.StorageMigrator = &service.StorageMigrator{
+				Queries: queries,
+				Local:   local,
+				Remote:  s3,
+				Logger:  slog.Default(),
+			}
+		}
+	}
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -2130,6 +2145,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.ArchiveIssueStatus)
 				})
 			})
+
+			// Local→object-store storage migration (self-hosted cutover).
+			// Entire feature is opt-in via MULTICA_STORAGE_MIGRATION_ENABLED —
+			// disabled by default in SaaS where an instance-wide scan has
+			// nothing to migrate. When enabled, both reads and start are
+			// gated to workspace owner/admin inside the handlers; GET also
+			// reports available=false when S3 is not configured so clients
+			// can hide the settings banner.
+			if envBool("MULTICA_STORAGE_MIGRATION_ENABLED", false) {
+				r.Route("/api/storage-migration", func(r chi.Router) {
+					r.Get("/", h.GetStorageMigrationStatus)
+					r.Post("/", h.StartStorageMigration)
+				})
+			}
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {

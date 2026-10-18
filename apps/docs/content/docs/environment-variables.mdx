@@ -129,12 +129,31 @@ When `S3_BUCKET` is unset, Multica uses local disk.
 | `S3_REGION` | `us-west-2` | Region the bucket lives in |
 | `AWS_ACCESS_KEY_ID` | SDK default credential chain | Static access key |
 | `AWS_SECRET_ACCESS_KEY` | SDK default credential chain | Static secret key |
-| `AWS_ENDPOINT_URL` | empty | S3-compatible endpoint such as MinIO |
+| `AWS_ENDPOINT_URL` | empty | S3-compatible endpoint such as MinIO, Tencent COS, or Aliyun OSS |
 | `S3_USE_PATH_STYLE` | `true` with a custom endpoint | Whether to use path-style addressing |
 | `ATTACHMENT_DOWNLOAD_MODE` | `auto` | `auto`, `cloudfront`, `presign`, or `proxy` |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | `30m` | Lifetime of signed download URLs |
 
 Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, for example — is not reachable from the browser.
+
+Tencent COS and Aliyun OSS work through the same variables:
+
+```dotenv
+# Tencent COS (virtual-hosted style; bucket name includes the APPID suffix)
+S3_BUCKET=my-bucket-1251234567
+S3_REGION=ap-guangzhou
+AWS_ENDPOINT_URL=https://cos.ap-guangzhou.myqcloud.com
+S3_USE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=<SecretId>
+AWS_SECRET_ACCESS_KEY=<SecretKey>
+
+# Aliyun OSS (signing region is the plain region ID, no "oss-" prefix)
+S3_BUCKET=my-bucket
+S3_REGION=cn-hangzhou
+AWS_ENDPOINT_URL=https://oss-cn-hangzhou.aliyuncs.com
+AWS_ACCESS_KEY_ID=<AccessKeyId>
+AWS_SECRET_ACCESS_KEY=<AccessKeySecret>
+```
 
 ### Local disk
 

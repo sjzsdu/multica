@@ -128,6 +128,7 @@ import type {
   UpdateLabelRequest,
   ListLabelsResponse,
   ListIssueStatusesResponse,
+  StorageMigrationStatus,
   IssueStatusCategory,
   IssueStatusEntry,
   CreateIssueStatusRequest,
@@ -266,6 +267,10 @@ import {
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
+  StorageMigrationStatusSchema,
+  StartStorageMigrationResponseSchema,
+  EMPTY_STORAGE_MIGRATION_STATUS,
+  EMPTY_START_STORAGE_MIGRATION_RESPONSE,
   ChildIssuesResponseSchema,
   IssueDuplicatesResponseSchema,
   ChildIssueProgressResponseSchema,
@@ -4180,6 +4185,38 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, { method: "DELETE" });
     return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
       endpoint: "DELETE /api/issue-statuses/{id}",
+    });
+  }
+
+  // Storage migration (local disk → object store, self-hosted cutover).
+  // Workspace owner/admin only. Any non-2xx response (older server 404,
+  // feature disabled 403, misconfigured backend 5xx) falls back to
+  // available=false so the settings UI simply hides itself instead of
+  // surfacing an error banner. parseWithFallback only covers malformed 2xx
+  // bodies — the fetch layer itself throws ApiError on non-2xx.
+  async getStorageMigrationStatus(): Promise<StorageMigrationStatus> {
+    try {
+      const raw = await this.fetch<unknown>("/api/storage-migration");
+      return parseWithFallback(raw, StorageMigrationStatusSchema, EMPTY_STORAGE_MIGRATION_STATUS, {
+        endpoint: "GET /api/storage-migration",
+      });
+    } catch (error) {
+      // ApiError means the server answered with a status code (404 on older
+      // backends, 403 on non-admin members, 404 when the route is gated
+      // behind an env flag). All of these are "treat as unavailable" —
+      // the UI hides the banner and retry loops stay quiet. Transport
+      // errors (network down, DNS) still throw so callers can surface them.
+      if (error instanceof ApiError) {
+        return EMPTY_STORAGE_MIGRATION_STATUS;
+      }
+      throw error;
+    }
+  }
+
+  async startStorageMigration(): Promise<{ started: boolean }> {
+    const raw = await this.fetch<unknown>("/api/storage-migration", { method: "POST" });
+    return parseWithFallback(raw, StartStorageMigrationResponseSchema, EMPTY_START_STORAGE_MIGRATION_RESPONSE, {
+      endpoint: "POST /api/storage-migration",
     });
   }
 

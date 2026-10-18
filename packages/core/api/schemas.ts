@@ -6,6 +6,7 @@ import type {
   AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
+  StorageMigrationStatus,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -3757,3 +3758,60 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Storage migration (local disk → configured object store, self-hosted
+// cutover). Lenient with defaults so an older server — which answers the
+// endpoint with an error body — parses to available=false and hides the UI
+// instead of rendering garbage counters.
+export const StorageMigrationFailureSchema = z
+  .object({
+    kind: z.string().catch(""),
+    id: z.string().catch(""),
+    url: z.string().catch(""),
+    error: z.string().catch(""),
+  })
+  .passthrough();
+
+export const StorageMigrationStateSchema = z
+  .object({
+    running: z.boolean().catch(false),
+    total: z.number().catch(0),
+    migrated: z.number().catch(0),
+    failed: z.number().catch(0),
+    local_cleaned: z.number().catch(0),
+    // Bounded server-side; dropped_failures counts anything past the cap.
+    failures: z.array(StorageMigrationFailureSchema).catch([]),
+    dropped_failures: z.number().catch(0),
+    started_at: z.string().nullish().catch(undefined),
+    finished_at: z.string().nullish().catch(undefined),
+  })
+  .passthrough();
+
+export const StorageMigrationStatusSchema = z
+  .object({
+    available: z.boolean().catch(false),
+    pending: z
+      .object({
+        pending_attachments: z.number().catch(0),
+        pending_avatars: z.number().catch(0),
+      })
+      .passthrough()
+      .nullish()
+      .catch(undefined),
+    state: StorageMigrationStateSchema.nullish().catch(undefined),
+  })
+  .passthrough();
+
+export const EMPTY_STORAGE_MIGRATION_STATUS: StorageMigrationStatus = {
+  available: false,
+};
+
+export const StartStorageMigrationResponseSchema = z
+  .object({
+    started: z.boolean(),
+  })
+  .passthrough();
+
+export const EMPTY_START_STORAGE_MIGRATION_RESPONSE: { started: boolean } = {
+  started: false,
+};

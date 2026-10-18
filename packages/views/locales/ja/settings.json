@@ -729,6 +729,13 @@
     "usage_help": "使い方"
   },
   "workspace": {
+    "storage_section": "ストレージ",
+    "storage_migration_label": "ローカルファイルの移行",
+    "storage_migration_pending": "添付ファイル {{attachments}} 件とアバター {{avatars}} 件がまだこのサーバーのローカルディスクにあります。",
+    "storage_migration_running": "オブジェクトストレージへ移動中… {{migrated}} 件移動、{{failed}} 件失敗。",
+    "storage_migration_finished": "オブジェクトストレージへ {{migrated}} 件のファイルを移動しました（{{failed}} 件失敗）。",
+    "storage_migration_start": "ファイルを移行",
+    "storage_migration_start_failed": "ストレージ移行の開始に失敗しました。",
     "section_general": "ワークスペース情報",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",

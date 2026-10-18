@@ -2,6 +2,12 @@ export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssign
   IssueDuplicateOf,
 } from "./issue";
 export type {
+  StorageMigrationFailure,
+  StorageMigrationPending,
+  StorageMigrationState,
+  StorageMigrationStatus,
+} from "./storage-migration";
+export type {
   IssueStatusCategory,
   IssueStatusEntry,
   IssueStatusIcon,
