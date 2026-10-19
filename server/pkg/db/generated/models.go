@@ -54,6 +54,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	FallbackRuntimes      []byte      `json:"fallback_runtimes"`
 }
 
 type AgentBuilderDraft struct {
@@ -1544,6 +1545,12 @@ type SysCronExecution struct {
 	ErrorMsg     pgtype.Text        `json:"error_msg"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SystemConfig struct {
+	ID        int32              `json:"id"`
+	Settings  []byte             `json:"settings"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {

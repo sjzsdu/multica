@@ -35,6 +35,7 @@ export type {
 } from "./issue-workflow";
 export type {
   Agent,
+  AgentFallbackRuntimeEntry,
   AgentConversationStarter,
   AgentStatus,
   AgentRuntimeMode,

@@ -997,11 +997,11 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	verdict, err := AgentReadiness(ctx, lookup, agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, lookup, agent)
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	return verdict, !verdict.Blocked()
+	return resolved.Verdict, !resolved.Verdict.Blocked()
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
@@ -1026,11 +1026,11 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(s.Queries), agent)
 	if err != nil {
 		return false
 	}
-	return verdict.Ready()
+	return resolved.Verdict.Ready()
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {

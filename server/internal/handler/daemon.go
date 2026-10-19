@@ -2591,6 +2591,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// Model/thinking/service tier follow the runtime the task was pinned to,
+	// not the agent row unconditionally: a fallback-dispatched task (task
+	// runtime_id != agent.runtime_id) runs the fallback entry's own settings,
+	// because model ids are per-runtime and the primary's model need not exist
+	// on the machine that actually claimed the work.
+	model, thinkingLevel, serviceTier := service.TaskExecutionSettings(agent, *task)
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
@@ -2598,9 +2604,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
-		Model:                 agent.Model.String,
-		ThinkingLevel:         agent.ThinkingLevel.String,
-		ServiceTier:           agent.ServiceTier.String,
+		Model:                 model.String,
+		ThinkingLevel:         thinkingLevel.String,
+		ServiceTier:           serviceTier.String,
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}

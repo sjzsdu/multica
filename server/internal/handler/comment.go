@@ -3212,8 +3212,8 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			// Same shared verdict as the direct-agent branch below.
-			if verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && verdict.Blocked() {
-				blockUnusableTarget("squad", m.ID, agent, verdict)
+			if resolved, err := service.ResolveRuntimeWithFallback(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && resolved.Verdict.Blocked() {
+				blockUnusableTarget("squad", m.ID, agent, resolved.Verdict)
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
@@ -3271,8 +3271,8 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		// will not start doing so on its own (MUL-6164). A merely offline
 		// runtime keeps queueing — that wait ends by itself when the machine
 		// returns, and taking it away would remove a behaviour people rely on.
-		if verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && verdict.Blocked() {
-			blockUnusableTarget("agent", m.ID, agent, verdict)
+		if resolved, err := service.ResolveRuntimeWithFallback(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && resolved.Verdict.Blocked() {
+			blockUnusableTarget("agent", m.ID, agent, resolved.Verdict)
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)

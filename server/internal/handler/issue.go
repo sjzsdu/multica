@@ -2896,12 +2896,16 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Quick-create needs the agent to run NOW, so any non-ready verdict refuses
 	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
 	// as "runtime is offline" and sends the user to reconnect a machine that is
-	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
+	// already connected (MUL-6164). The fallback chain is consulted first, so a
+	// blocked primary with a live fallback still proceeds; the resolved runtime
+	// drives the daemon-version checks below.
+	resolved, err := service.ResolveRuntimeWithFallback(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
-	} else if !verdict.Ready() {
-		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
+	}
+	if !resolved.Verdict.Ready() {
+		writeAgentUnavailable(w, resolved.Verdict.Detail, resolved.Verdict.Reason)
 		return
 	}
 
@@ -2914,13 +2918,13 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// twenty seconds later. Dev-built
 	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
 	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID); status != 0 {
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, resolved.RuntimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
 	if priority != "" || dueDate != "" {
 		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+			r.Context(), obsmetrics.RuntimeLookupSourceIssue, resolved.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
 		); status != 0 {
 			writeJSON(w, status, payload)
 			return
@@ -4477,19 +4481,20 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	if err != nil {
 		return false
 	}
-	// The shared verdict, not a local re-check (service.AgentReadiness). Only a
-	// BLOCKED verdict stops the enqueue: an offline machine still queues,
-	// because that work runs when the machine comes back.
-	verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
-	if err != nil || !verdict.Blocked() {
+	// The shared verdict, not a local re-check (service.ResolveRuntimeWithFallback).
+	// Only a BLOCKED verdict after the fallback chain is exhausted stops the
+	// enqueue: an offline machine still queues, because that work runs when the
+	// machine comes back.
+	resolved, err := service.ResolveRuntimeWithFallback(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
+	if err != nil || !resolved.Verdict.Blocked() {
 		return err == nil
 	}
 	// Assignment has no response the assigner reads for this outcome, so a
 	// refusal that needs human repair leaves the explanation on the issue
 	// (MUL-6164). An unbound agent keeps its silent skip: the agent list
 	// already shows it has no runtime, and nothing about it is new here.
-	if service.RuntimeBlockedNeedsNotice(verdict.Reason) {
-		h.noteRuntimeUnusable(ctx, issue, agent, verdict)
+	if service.RuntimeBlockedNeedsNotice(resolved.Verdict.Reason) {
+		h.noteRuntimeUnusable(ctx, issue, agent, resolved.Verdict)
 	}
 	return false
 }
