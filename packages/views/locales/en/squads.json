@@ -112,7 +112,8 @@
     "leader_updated": "Leader updated",
     "leader_update_failed": "Failed to update leader",
     "archive_failed": "Failed to archive squad",
-    "instructions_saved": "Instructions saved"
+    "instructions_saved": "Instructions saved",
+    "workflow_settings_saved": "Workflow settings saved"
   },
   "profile_card": {
     "unavailable": "Squad unavailable",

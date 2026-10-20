@@ -111,7 +111,8 @@
     "leader_updated": "リーダーを更新しました",
     "leader_update_failed": "リーダーを更新できませんでした",
     "archive_failed": "スクワッドをアーカイブできませんでした",
-    "instructions_saved": "指示を保存しました"
+    "instructions_saved": "指示を保存しました",
+    "workflow_settings_saved": "ワークフロー設定を保存しました"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",

@@ -92,7 +92,8 @@
   },
   "detail_tabs": {
     "members": "Membres",
-    "instructions": "Instructions"
+    "instructions": "Instructions",
+    "workflow": "Workflow"
   },
   "details": {
     "leader": "Chef",
@@ -111,7 +112,8 @@
     "leader_updated": "Responsable mis à jour",
     "leader_update_failed": "Échec de la mise à jour du responsable",
     "archive_failed": "Échec de l'archivage du squad",
-    "instructions_saved": "Instructions enregistrées"
+    "instructions_saved": "Instructions enregistrées",
+    "workflow_settings_saved": "Paramètres du workflow enregistrés"
   },
   "profile_card": {
     "unavailable": "Squad indisponible",
@@ -128,6 +130,30 @@
     "unsaved_changes": "Modifications non enregistrées",
     "save_button": "Enregistrer",
     "placeholder": "Par exemple : commencez toujours par écrire un test qui échoue. Privilégiez des commits petits et atomiques."
+  },
+  "workflow_tab": {
+    "title": "Politique du workflow",
+    "description": "Contrôlez la façon dont ce squad avance ses sous-tâches et clôt la tâche parente.",
+    "mode_label": "Mode",
+    "mode_manual": "Manuel",
+    "mode_staged": "Par étapes",
+    "mode_delivery": "Livraison",
+    "max_active_children_label": "Sous-tâches actives max",
+    "unlimited_hint": "0 signifie illimité.",
+    "auto_promote_label": "Promouvoir automatiquement les étapes",
+    "auto_promote_description": "Démarre l'étape suivante lorsque l'étape en cours franchit ses portes.",
+    "auto_finalize_label": "Déplacer automatiquement la tâche parente en relecture",
+    "auto_finalize_description": "Déplace la tâche parente en relecture après le passage de toutes les étapes et portes ; elle ne marque jamais la tâche parente comme terminée.",
+    "require_tests_label": "Exiger des tests",
+    "require_tests_description": "Un signal de test/vérification réussi est requis avant la promotion.",
+    "require_review_label": "Exiger une relecture",
+    "require_review_description": "Un signal de relecture ou une approbation humaine est requis.",
+    "require_merge_label": "Exiger une fusion",
+    "require_merge_description": "Une modification fusionnée ou la politique de fusion sélectionnée est requise.",
+    "human_approval_label": "Exiger une approbation humaine",
+    "human_approval_description": "Met le workflow en pause jusqu'à ce qu'un membre approuve l'étape.",
+    "changes_hint": "Les modifications s'appliquent aux nouvelles transitions et tentatives du workflow.",
+    "save_button": "Enregistrer"
   },
   "scope": {
     "mine": "Les miens",

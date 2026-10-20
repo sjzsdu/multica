@@ -111,7 +111,8 @@
     "leader_updated": "리더를 업데이트했습니다",
     "leader_update_failed": "리더를 업데이트하지 못했습니다",
     "archive_failed": "스쿼드를 보관하지 못했습니다",
-    "instructions_saved": "지침을 저장했습니다"
+    "instructions_saved": "지침을 저장했습니다",
+    "workflow_settings_saved": "워크플로 설정이 저장되었습니다"
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",

@@ -248,7 +248,7 @@ export function SquadDetailPage() {
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
           onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.toasts.instructions_saved)); }}
-          onSaveWorkflow={async (workflow) => { await updateSquadMut.mutateAsync({ workflow }); toast.success("Workflow settings saved"); }}
+          onSaveWorkflow={async (workflow) => { await updateSquadMut.mutateAsync({ workflow }); toast.success(t(($) => $.toasts.workflow_settings_saved)); }}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>

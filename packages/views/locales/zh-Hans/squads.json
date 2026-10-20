@@ -111,7 +111,8 @@
     "leader_updated": "队长已更新",
     "leader_update_failed": "更新队长失败",
     "archive_failed": "归档小队失败",
-    "instructions_saved": "指引已保存"
+    "instructions_saved": "指引已保存",
+    "workflow_settings_saved": "工作流设置已保存"
   },
   "profile_card": {
     "unavailable": "小队不可用",
