@@ -58,7 +58,7 @@ it("shows the pending tally and starts a migration", async () => {
 
   expect(
     await screen.findByText(
-      "3 attachments and 1 avatars still live on this server's local disk.",
+      "3 attachments and 1 avatar still live on this server's local disk.",
     ),
   ).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Migrate files" }));
@@ -85,7 +85,7 @@ it("reports live progress while a run is in flight", async () => {
   );
   expect(
     await screen.findByText(
-      "Moving files to object storage… 1 moved, 0 failed.",
+      "Moving file to object storage… 1 moved, 0 failed.",
     ),
   ).toBeVisible();
   // No second start is offered mid-run; the server would answer 409 anyway.
