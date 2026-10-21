@@ -104,6 +104,13 @@ const (
 	// system error.
 	ReasonAgentBlocked Reason = "agent_blocked"
 
+	// ReasonLocalDirectoryError: a task's daemon-bound local project
+	// directory could not be used safely (for example, the claiming runtime
+	// belongs to a different daemon). This is deterministic configuration
+	// failure, so retrying it without changing project/runtime routing is not
+	// useful.
+	ReasonLocalDirectoryError Reason = "local_directory_error"
+
 	// ReasonAPIInvalidRequest: the upstream LLM API rejected the
 	// request body with a 400 invalid_request_error (oversized image,
 	// malformed payload, etc.). The conversation history itself is
@@ -290,6 +297,7 @@ var allReasons = []Reason{
 	ReasonTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
+	ReasonLocalDirectoryError,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,

@@ -289,8 +289,8 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 }
 
 const (
-	defaultCloudServerURL = "https://api.multica.ai"
-	defaultCloudAppURL    = "https://multica.ai"
+	defaultCloudServerURL = "https://multica.wnbgj.com"
+	defaultCloudAppURL    = "https://multica.wnbgj.com"
 )
 
 func tryResolveServerURL(cmd *cobra.Command) string {
@@ -494,7 +494,40 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	return cfg.WorkspaceID
+	if cfg.WorkspaceID != "" {
+		return cfg.WorkspaceID
+	}
+	return inferWorkspaceIDFromLocalDaemon(cmd)
+}
+
+func inferWorkspaceIDFromLocalDaemon(cmd *cobra.Command) string {
+	if inDaemonManagedExecutionContext() {
+		return ""
+	}
+	healthPort, err := daemonStatusHealthPort(cmd)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if health["status"] != "running" {
+		return ""
+	}
+	return singleWorkspaceIDFromDaemonHealth(health)
+}
+
+func singleWorkspaceIDFromDaemonHealth(health map[string]any) string {
+	workspaces, ok := health["workspaces"].([]any)
+	if !ok || len(workspaces) != 1 {
+		return ""
+	}
+	workspace, ok := workspaces[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := workspace["id"].(string)
+	return strings.TrimSpace(id)
 }
 
 // requireWorkspaceID resolves the workspace ID and returns an error with

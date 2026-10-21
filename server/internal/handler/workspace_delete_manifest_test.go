@@ -126,7 +126,13 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"skill_to_label":                     workspaceDelete,
 	"squad":                              workspaceDelete,
 	"squad_member":                       workspaceDelete,
+	"squad_workflow_approval":            workspaceDelete,
+	"squad_workflow_policy":              workspaceDelete,
+	"squad_workflow_run":                  workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
+	// system_config is the global singleton (id = 1): instance-wide settings
+	// with no workspace column, so teardown never touches it.
+	"system_config":                      workspaceDeleteKeep,
 	"task_message":                       workspaceDelete,
 	"task_supplement":                    workspaceDelete,
 	"task_supplement_capability":         workspaceDelete,

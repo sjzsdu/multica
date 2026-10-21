@@ -189,7 +189,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    const urlInput = screen.getByLabelText(/attach a github repo/i);
+    const urlInput = screen.getByLabelText(/attach a resource/i);
     fireEvent.change(urlInput, {
       target: { value: "https://github.com/multica-ai/other" },
     });
@@ -211,11 +211,11 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
     // What someone copies out of the address bar when they want a branch.
     // Stored whole, this is a clone URL that does not exist.
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
+    fireEvent.change(screen.getByLabelText(/attach a resource/i), {
       target: { value: "https://github.com/multica-ai/other/tree/release/2026-09" },
     });
 
-    const urlInput = screen.getByLabelText(/attach a github repo/i) as HTMLInputElement;
+    const urlInput = screen.getByLabelText(/attach a resource/i) as HTMLInputElement;
     const refInput = screen.getByLabelText(/starting branch/i) as HTMLInputElement;
     expect(urlInput.value).toBe("https://github.com/multica-ai/other");
     expect(refInput.value).toBe("release/2026-09");
@@ -237,7 +237,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    const urlInput = () => screen.getByLabelText(/attach a github repo/i) as HTMLInputElement;
+    const urlInput = () => screen.getByLabelText(/attach a resource/i) as HTMLInputElement;
     const refInput = () => screen.getByLabelText(/starting branch/i) as HTMLInputElement;
 
     fireEvent.change(urlInput(), {
@@ -264,7 +264,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
+    fireEvent.change(screen.getByLabelText(/attach a resource/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }));
@@ -280,7 +280,7 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
     fireEvent.click(screen.getByRole("button", { name: /add resource/i }));
-    fireEvent.change(screen.getByLabelText(/attach a github repo/i), {
+    fireEvent.change(screen.getByLabelText(/attach a resource/i), {
       target: { value: "https://github.com/multica-ai/other" },
     });
     fireEvent.change(screen.getByLabelText(/starting branch/i), {

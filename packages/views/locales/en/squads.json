@@ -92,7 +92,8 @@
   },
   "detail_tabs": {
     "members": "Members",
-    "instructions": "Instructions"
+    "instructions": "Instructions",
+    "workflow": "Workflow"
   },
   "details": {
     "leader": "Leader",
@@ -111,7 +112,8 @@
     "leader_updated": "Leader updated",
     "leader_update_failed": "Failed to update leader",
     "archive_failed": "Failed to archive squad",
-    "instructions_saved": "Instructions saved"
+    "instructions_saved": "Instructions saved",
+    "workflow_settings_saved": "Workflow settings saved"
   },
   "profile_card": {
     "unavailable": "Squad unavailable",
@@ -128,6 +130,30 @@
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save",
     "placeholder": "e.g. Always start by writing a failing test. Prefer small, atomic commits."
+  },
+  "workflow_tab": {
+    "title": "Workflow policy",
+    "description": "Control how this squad advances child work and closes the parent issue.",
+    "mode_label": "Mode",
+    "mode_manual": "Manual",
+    "mode_staged": "Staged",
+    "mode_delivery": "Delivery",
+    "max_active_children_label": "Max active children",
+    "unlimited_hint": "0 means unlimited.",
+    "auto_promote_label": "Automatically promote stages",
+    "auto_promote_description": "Start the next stage when the current stage passes its gates.",
+    "auto_finalize_label": "Automatically move parent to In Review",
+    "auto_finalize_description": "Moves the parent to In Review after all stages and gates pass; it never marks the parent Done.",
+    "require_tests_label": "Require tests",
+    "require_tests_description": "A passing test/check signal is required before promotion.",
+    "require_review_label": "Require review",
+    "require_review_description": "A review signal or human review approval is required.",
+    "require_merge_label": "Require merge",
+    "require_merge_description": "A merged change or the selected merge policy is required.",
+    "human_approval_label": "Require human approval",
+    "human_approval_description": "Pause the workflow until a member approves the stage.",
+    "changes_hint": "Changes apply to new workflow transitions and retries.",
+    "save_button": "Save"
   },
   "scope": {
     "mine": "Mine",

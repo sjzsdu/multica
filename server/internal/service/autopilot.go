@@ -993,12 +993,12 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(), agent)
 	if err != nil {
 		return fmt.Errorf("check agent readiness: %w", err)
 	}
-	if !verdict.Ready() {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, verdict.Detail), code: verdict.Reason}
+	if !resolved.Verdict.Ready() {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, resolved.Verdict.Detail), code: resolved.Verdict.Reason}
 	}
 
 	// Fail-closed invocation gate for squad autopilots (admission principal =
@@ -1036,9 +1036,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
-		ID:             dbid.NewV7(),
-		AgentID:        agent.ID,
-		RuntimeID:      agent.RuntimeID,
+		ID:      dbid.NewV7(),
+		AgentID: agent.ID,
+		// The runtime the fallback chain resolved for this run — the primary
+		// unless every probe found it blocked and a later entry came back.
+		RuntimeID:      resolved.RuntimeID,
 		Priority:       0,
 		AutopilotRunID: run.ID,
 		// Snapshot the autopilot title so task rows self-describe later
@@ -1357,7 +1359,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		// chance to succeed.
 		return "", "", false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(), agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(), agent)
 	if err != nil {
 		slog.Warn("autopilot admission: failed to load runtime",
 			"autopilot_id", util.UUIDToString(ap.ID),
@@ -1366,19 +1368,19 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		)
 		return "", "", false
 	}
-	if !verdict.Ready() {
+	if !resolved.Verdict.Ready() {
 		// A merely-offline machine still gets create_issue work: the issue is
 		// written server-side and the run waits for the laptop to come back. An
 		// unusable runtime does not qualify — nothing there can run until a
 		// human repairs it, so a doomed issue-create is not an improvement.
-		if ap.ExecutionMode == "create_issue" && verdict.Availability == AgentWaitable {
+		if ap.ExecutionMode == "create_issue" && resolved.Verdict.Availability == AgentWaitable {
 			slog.Info("autopilot admission: allowing create_issue dispatch for offline runtime",
 				"autopilot_id", util.UUIDToString(ap.ID),
-				"runtime_id", util.UUIDToString(agent.RuntimeID),
-				"reason", verdict.Detail,
+				"runtime_id", util.UUIDToString(resolved.RuntimeID),
+				"reason", resolved.Verdict.Detail,
 			)
 		} else {
-			return formatAdmissionReason(ap, verdict.Detail), verdict.Reason, true
+			return formatAdmissionReason(ap, resolved.Verdict.Detail), resolved.Verdict.Reason, true
 		}
 	}
 	// Invocation gate at the autopilot layer (MUL-3963 / MUL-4525). The

@@ -15,7 +15,7 @@ import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save, Settings2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -59,7 +59,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, SquadWorkflowPolicy, Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -119,7 +119,7 @@ export function SquadDetailPage() {
   const [confirmArchive, setConfirmArchive] = useState(false);
 
   const updateSquadMut = useMutation({
-    mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
+    mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string; workflow?: Partial<SquadWorkflowPolicy> }) => api.updateSquad(squadId, data),
     onSuccess: () => {
       refetchSquad();
       refetchMembers();
@@ -248,6 +248,7 @@ export function SquadDetailPage() {
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
           onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.toasts.instructions_saved)); }}
+          onSaveWorkflow={async (workflow) => { await updateSquadMut.mutateAsync({ workflow }); toast.success(t(($) => $.toasts.workflow_settings_saved)); }}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
@@ -929,15 +930,30 @@ function SquadDescriptionEditorBody({
   );
 }
 
-// SquadOverviewPane — right column with two tabs (Members | Instructions).
-// Mirrors AgentOverviewPane: dirty-guard via AlertDialog when switching tabs
-// with unsaved Instructions.
-type SquadDetailTab = "members" | "instructions";
+// SquadOverviewPane — right column with three tabs (Members | Instructions |
+// Workflow). Mirrors AgentOverviewPane: dirty-guard via AlertDialog when
+// switching tabs with unsaved Instructions.
+// ---------------------------------------------------------------------------
+type SquadDetailTab = "members" | "instructions" | "workflow";
 
-const squadDetailTabs: { id: SquadDetailTab; icon: typeof FileText }[] = [
-  { id: "members", icon: Users },
-  { id: "instructions", icon: FileText },
+const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileText }[] = [
+  { id: "members", label: "Members", icon: Users },
+  { id: "instructions", label: "Instructions", icon: FileText },
+  { id: "workflow", label: "Workflow", icon: Settings2 },
 ];
+
+const DEFAULT_SQUAD_WORKFLOW: SquadWorkflowPolicy = {
+  mode: "manual",
+  max_active_children: 0,
+  child_completion_signal: "terminal_only",
+  auto_promote_stage: false,
+  auto_finalize_parent: false,
+  require_tests: false,
+  require_review: false,
+  require_merge: false,
+  merge_mode: "human",
+  human_approval_required: true,
+};
 
 function SquadOverviewPane({
   squad,
@@ -953,6 +969,7 @@ function SquadOverviewPane({
   onRemoveMember,
   onUpdateRole,
   onSaveInstructions,
+  onSaveWorkflow,
   setLeaderPending,
 }: {
   squad: Squad;
@@ -974,6 +991,7 @@ function SquadOverviewPane({
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
   onSaveInstructions: (next: string) => Promise<void>;
+  onSaveWorkflow: (workflow: Partial<SquadWorkflowPolicy>) => Promise<void>;
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
@@ -1044,6 +1062,11 @@ function SquadOverviewPane({
             />
           </div>
         )}
+        {activeTab === "workflow" && (
+          <div className="flex h-full flex-col p-4 md:p-6">
+            <SquadWorkflowTab squad={squad} canManage={canManage} onSave={onSaveWorkflow} />
+          </div>
+        )}
       </div>
 
       {pendingTab !== null && (
@@ -1064,6 +1087,109 @@ function SquadOverviewPane({
           </AlertDialogContent>
         </AlertDialog>
       )}
+    </div>
+  );
+}
+
+function SquadWorkflowTab({
+  squad,
+  canManage,
+  onSave,
+}: {
+  squad: Squad;
+  canManage: boolean;
+  onSave: (workflow: Partial<SquadWorkflowPolicy>) => Promise<void>;
+}) {
+  const { t } = useT("squads");
+  const [draft, setDraft] = useState<SquadWorkflowPolicy>(squad.workflow ?? DEFAULT_SQUAD_WORKFLOW);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setDraft(squad.workflow ?? DEFAULT_SQUAD_WORKFLOW), [squad.workflow]);
+
+  const update = <K extends keyof SquadWorkflowPolicy>(key: K, value: SquadWorkflowPolicy[K]) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleFields: Array<[keyof SquadWorkflowPolicy, string, string]> = [
+    ["auto_promote_stage", t(($) => $.workflow_tab.auto_promote_label), t(($) => $.workflow_tab.auto_promote_description)],
+    ["auto_finalize_parent", t(($) => $.workflow_tab.auto_finalize_label), t(($) => $.workflow_tab.auto_finalize_description)],
+    ["require_tests", t(($) => $.workflow_tab.require_tests_label), t(($) => $.workflow_tab.require_tests_description)],
+    ["require_review", t(($) => $.workflow_tab.require_review_label), t(($) => $.workflow_tab.require_review_description)],
+    ["require_merge", t(($) => $.workflow_tab.require_merge_label), t(($) => $.workflow_tab.require_merge_description)],
+    ["human_approval_required", t(($) => $.workflow_tab.human_approval_label), t(($) => $.workflow_tab.human_approval_description)],
+  ];
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-body font-medium">{t(($) => $.workflow_tab.title)}</h2>
+        <p className="mt-1 text-caption text-muted-foreground">{t(($) => $.workflow_tab.description)}</p>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="space-y-1.5 text-caption">
+          <span className="font-medium">{t(($) => $.workflow_tab.mode_label)}</span>
+          <select
+            value={draft.mode}
+            disabled={!canManage}
+            onChange={(event) => update("mode", event.target.value as SquadWorkflowPolicy["mode"])}
+            className="h-9 w-full rounded-md border bg-background px-2 text-caption outline-none focus-visible:border-input"
+          >
+            <option value="manual">{t(($) => $.workflow_tab.mode_manual)}</option>
+            <option value="staged">{t(($) => $.workflow_tab.mode_staged)}</option>
+            <option value="delivery">{t(($) => $.workflow_tab.mode_delivery)}</option>
+          </select>
+        </label>
+        <label className="space-y-1.5 text-caption">
+          <span className="font-medium">{t(($) => $.workflow_tab.max_active_children_label)}</span>
+          <input
+            type="number"
+            min={0}
+            value={draft.max_active_children}
+            disabled={!canManage}
+            onChange={(event) => update("max_active_children", Math.max(0, Number(event.target.value) || 0))}
+            className="h-9 w-full rounded-md border bg-background px-2 text-caption outline-none focus-visible:border-input"
+          />
+          <span className="text-muted-foreground">{t(($) => $.workflow_tab.unlimited_hint)}</span>
+        </label>
+      </div>
+
+      <div className="space-y-2">
+        {toggleFields.map(([key, label, description]) => (
+          <label key={key} className={`flex gap-3 rounded-md border p-3 ${canManage ? "cursor-pointer hover:bg-accent/40" : "opacity-70"}`}>
+            <input
+              type="checkbox"
+              checked={Boolean(draft[key])}
+              disabled={!canManage}
+              onChange={(event) => update(key, event.target.checked as SquadWorkflowPolicy[typeof key])}
+              className="mt-0.5 size-4 accent-foreground"
+            />
+            <span className="space-y-0.5">
+              <span className="block text-caption font-medium">{label}</span>
+              <span className="block text-[11px] text-muted-foreground">{description}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-between border-t pt-4">
+        <span className="text-[11px] text-muted-foreground">{t(($) => $.workflow_tab.changes_hint)}</span>
+        {canManage && (
+          <Button size="sm" onClick={() => void save()} disabled={saving}>
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+            {t(($) => $.workflow_tab.save_button)}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

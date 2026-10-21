@@ -11,6 +11,7 @@ import type {
   AgentBuilderSessionSummary,
   Attachment,
   AutopilotRun,
+  StorageMigrationStatus,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -89,6 +90,7 @@ import type {
   SkillImportResult,
   SkillSummary,
   Squad,
+  SquadWorkflowRun,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -2378,6 +2380,48 @@ const SquadMemberPreviewSchema = z.object({
   role: z.string().default(""),
 }).loose();
 
+export const SquadWorkflowPolicySchema = z.object({
+  mode: z.enum(["manual", "staged", "delivery"]).default("manual"),
+  max_active_children: z.number().int().min(0).default(0),
+  child_completion_signal: z.enum(["terminal_only", "review_ready"]).default("terminal_only"),
+  auto_promote_stage: z.boolean().default(false),
+  auto_finalize_parent: z.boolean().default(false),
+  require_tests: z.boolean().default(false),
+  require_review: z.boolean().default(false),
+  require_merge: z.boolean().default(false),
+  merge_mode: z.enum(["human", "integrator", "pr_close_intent"]).default("human"),
+  human_approval_required: z.boolean().default(true),
+}).loose();
+
+export const SquadWorkflowApprovalSchema = z.object({
+  id: z.string(),
+  closed_stage: z.number().int(),
+  gate: z.enum(["tests", "review", "merge", "human_approval"]),
+  approved: z.boolean(),
+  approved_by_type: z.string(),
+  approved_by_id: z.string(),
+  note: z.string().optional(),
+  approved_at: z.string(),
+}).loose();
+
+export const SquadWorkflowRunSchema = z.object({
+  id: z.string(),
+  squad_id: z.string(),
+  parent_issue_id: z.string(),
+  closed_stage: z.number().int(),
+  next_stage: z.number().int(),
+  state: z.string(),
+  gate_snapshot: z.record(z.string(), z.unknown()).default({}),
+  attempt_count: z.number().int().default(0),
+  next_attempt_at: z.string(),
+  last_error: z.string().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  approvals: z.array(SquadWorkflowApprovalSchema).default([]),
+}).loose();
+export const SquadWorkflowRunListSchema = z.array(SquadWorkflowRunSchema);
+export const EMPTY_SQUAD_WORKFLOW_RUN_LIST: SquadWorkflowRun[] = [];
+
 export const SquadSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -2395,6 +2439,18 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  workflow: SquadWorkflowPolicySchema.default({
+    mode: "manual",
+    max_active_children: 0,
+    child_completion_signal: "terminal_only",
+    auto_promote_stage: false,
+    auto_finalize_parent: false,
+    require_tests: false,
+    require_review: false,
+    require_merge: false,
+    merge_mode: "human",
+    human_approval_required: true,
+  }),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);
@@ -2414,6 +2470,18 @@ export const EMPTY_SQUAD: Squad = {
   archived_by: null,
   member_count: 0,
   member_preview: [],
+  workflow: {
+    mode: "manual",
+    max_active_children: 0,
+    child_completion_signal: "terminal_only",
+    auto_promote_stage: false,
+    auto_finalize_parent: false,
+    require_tests: false,
+    require_review: false,
+    require_merge: false,
+    merge_mode: "human",
+    human_approval_required: true,
+  },
 };
 
 // Squad member status — backs the Squad detail page's Members tab. status
@@ -3828,3 +3896,60 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Storage migration (local disk → configured object store, self-hosted
+// cutover). Lenient with defaults so an older server — which answers the
+// endpoint with an error body — parses to available=false and hides the UI
+// instead of rendering garbage counters.
+export const StorageMigrationFailureSchema = z
+  .object({
+    kind: z.string().catch(""),
+    id: z.string().catch(""),
+    url: z.string().catch(""),
+    error: z.string().catch(""),
+  })
+  .passthrough();
+
+export const StorageMigrationStateSchema = z
+  .object({
+    running: z.boolean().catch(false),
+    total: z.number().catch(0),
+    migrated: z.number().catch(0),
+    failed: z.number().catch(0),
+    local_cleaned: z.number().catch(0),
+    // Bounded server-side; dropped_failures counts anything past the cap.
+    failures: z.array(StorageMigrationFailureSchema).catch([]),
+    dropped_failures: z.number().catch(0),
+    started_at: z.string().nullish().catch(undefined),
+    finished_at: z.string().nullish().catch(undefined),
+  })
+  .passthrough();
+
+export const StorageMigrationStatusSchema = z
+  .object({
+    available: z.boolean().catch(false),
+    pending: z
+      .object({
+        pending_attachments: z.number().catch(0),
+        pending_avatars: z.number().catch(0),
+      })
+      .passthrough()
+      .nullish()
+      .catch(undefined),
+    state: StorageMigrationStateSchema.nullish().catch(undefined),
+  })
+  .passthrough();
+
+export const EMPTY_STORAGE_MIGRATION_STATUS: StorageMigrationStatus = {
+  available: false,
+};
+
+export const StartStorageMigrationResponseSchema = z
+  .object({
+    started: z.boolean(),
+  })
+  .passthrough();
+
+export const EMPTY_START_STORAGE_MIGRATION_RESPONSE: { started: boolean } = {
+  started: false,
+};

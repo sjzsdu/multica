@@ -255,82 +255,62 @@ func TestPlatformSkillRoutingTableMatchesItsReferences(t *testing.T) {
 	}
 }
 
-// TestLegacyRedirectsFollowTheDaemonsBrief pins the compatibility contract for
-// the merge (MUL-6986).
+// TestLegacySkillShipsAsARealSkill pins the fork's divergence from upstream
+// (upstream: MUL-6986).
 //
-// The runtime brief is assembled by the DAEMON, so deploying a backend does not
-// rewrite an installed daemon's copy of it. A daemon released before the merge
-// still tells its agent to "read the `multica-working-on-issues` skill" — a
-// name this server no longer ships — and backend upgrades do not force a daemon
-// upgrade, so that window is open-ended. Such a daemon gets a redirect stub;
-// a current one gets nothing extra, which is what lets the stub retire itself.
-//
-// The stub must stay a signpost: if it ever grows contracts of its own they
-// will rot against references/issues.md, silently, on exactly the installs that
-// cannot be updated from here.
-func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
+// Upstream folded multica-working-on-issues into multica-platform and shipped
+// a redirect stub for pre-merge daemons whose frozen brief still names it.
+// This fork restores it as a real skill with full contracts, so every daemon —
+// current or pre-merge — receives the real thing under the name its brief
+// points at, and no redirect-stub mechanism exists to keep alive.
+func TestLegacySkillShipsAsARealSkill(t *testing.T) {
 	const legacy = "multica-working-on-issues"
 	svc := &TaskService{}
 
-	current := svc.BuiltinSkills("", false)
-	if named(current, legacy) {
-		t.Errorf("a current daemon still receives %q; the stub only exists for briefs that name it", legacy)
+	current := svc.BuiltinSkills("")
+	if !named(current, legacy) {
+		t.Errorf("a current daemon does not receive %q", legacy)
 	}
 	if !named(current, PlatformSkillName) {
 		t.Fatalf("a current daemon does not receive %q", PlatformSkillName)
 	}
 
-	old := svc.BuiltinSkills("", true)
-	if !named(old, legacy) {
-		t.Errorf("a pre-merge daemon does not receive %q, so its brief points at a skill that is not installed", legacy)
-	}
-	if !named(old, PlatformSkillName) {
-		t.Errorf("a pre-merge daemon lost %q; the redirect adds to the set, it does not replace it", PlatformSkillName)
-	}
-
-	// Mika's scoping is orthogonal to the redirect: both dimensions compose.
-	if !named(svc.BuiltinSkills(MikaSystemKey, true), "multica-onboarding") {
-		t.Errorf("Mika on a pre-merge daemon lost multica-onboarding")
-	}
-	if named(svc.BuiltinSkills("", true), "multica-onboarding") {
-		t.Errorf("the redirect path leaked multica-onboarding to an ordinary agent")
-	}
-
-	var stub AgentSkillData
-	for _, s := range old {
+	// Exactly one entry: a same-named stub would collide with the real skill.
+	occurrences := 0
+	for _, s := range current {
 		if s.Name == legacy {
-			stub = s
+			occurrences++
 		}
 	}
-	if len(stub.Files) != 0 {
-		t.Errorf("redirect stub ships %d supporting files; it should carry nothing but the new location", len(stub.Files))
-	}
-	_, body, ok := splitFrontmatter(stub.Content)
-	if !ok {
-		t.Fatal("redirect stub has no frontmatter")
-	}
-	if !strings.Contains(body, PlatformSkillName) || !strings.Contains(body, "references/issues.md") {
-		t.Errorf("redirect stub does not name where the contracts went:\n%s", body)
-	}
-	// MUL-6966: the stub used to promise "Nothing was dropped in the move".
-	// The metadata guidance since was dropped, and the daemons that reach
-	// this stub are exactly the ones whose frozen brief still sends them
-	// here for it — so the one place the claim is read is the one place it
-	// is false. It has to state the replacement rule instead.
-	if strings.Contains(body, "Nothing was dropped") {
-		t.Errorf("redirect stub still promises nothing was dropped:\n%s", body)
-	}
-	if !strings.Contains(body, "goes in the result comment") {
-		t.Errorf("redirect stub does not say where the retired state now belongs:\n%s", body)
-	}
-	if n := strings.Count(body, "\n") + 1; n > 40 {
-		t.Errorf("redirect stub is %d lines; a signpost that grows contracts will rot against the real reference", n)
+	if occurrences != 1 {
+		t.Fatalf("%q appears %d times in the builtin set; want exactly 1", legacy, occurrences)
 	}
 
-	// Bundle resolution must still serve it: the stub reaches the daemon as a
-	// ref like any other built-in, and the resolve path is name-blind.
+	// The restored skill must be the real thing, not a signpost: it carries
+	// supporting files, which a redirect stub by contract never does.
+	var real AgentSkillData
+	for _, s := range current {
+		if s.Name == legacy {
+			real = s
+		}
+	}
+	if len(real.Files) == 0 {
+		t.Errorf("%q ships no supporting files; it degenerated into a redirect stub", legacy)
+	}
+
+	// Mika's scoping is orthogonal to the restore: the restored skill is
+	// universal, onboarding stays scoped to Mika.
+	if !named(svc.BuiltinSkills(MikaSystemKey), legacy) {
+		t.Errorf("Mika lost %q", legacy)
+	}
+	if named(svc.BuiltinSkills(""), "multica-onboarding") {
+		t.Errorf("multica-onboarding leaked to an ordinary agent")
+	}
+
+	// Bundle resolution must still serve it: built-ins reach the daemon as a
+	// ref like any other skill, and the resolve path is name-blind.
 	if !named(svc.AllBuiltinSkills(), legacy) {
-		t.Errorf("the unscoped set is missing %q; bundle resolution would 404 for a pre-merge daemon", legacy)
+		t.Errorf("the unscoped set is missing %q; bundle resolution would 404", legacy)
 	}
 }
 
@@ -352,8 +332,9 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/mentions.md":     "mention",
+		"references/issues.md":        "issue",
+		"references/issues-wakeups.md": "wakeup",
+		"references/mentions.md":      "mention",
 		"references/agents.md":       "agent",
 		"references/squads.md":       "squad",
 		"references/autopilots.md":   "autopilot",
@@ -841,11 +822,125 @@ func named(skills []AgentSkillData, name string) bool {
 	return false
 }
 
-// allBuiltinSkillsForTest includes the legacy redirect stubs. They are shipped
-// payload like any other built-in, so the template, frontmatter and
-// source-leak suites must hold for them as well.
+// allBuiltinSkillsForTest returns the shipped built-in set. The template,
+// frontmatter and source-leak suites must hold for every one of them.
 func allBuiltinSkillsForTest() []AgentSkillData {
-	return append(loadBuiltinSkillDirs(func(string) bool { return true }), legacyRedirectSkills()...)
+	return loadBuiltinSkillDirs(func(string) bool { return true })
+}
+
+func TestAutopilotsSkillCoversDispatchAndSideEffects(t *testing.T) {
+	skill, ok := findSkill(t, "multica-autopilots")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"An autopilot is not an agent",
+		"create_issue",
+		"run_only",
+		"multica autopilot trigger-add <autopilot-id> --kind schedule",
+		"multica autopilot trigger <autopilot-id> --output json",
+		"Do not run `trigger`",
+		"webhook tokens",
+		"{{date}}",
+		"squad's leader agent",
+		"references/autopilots-source-map.md",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("autopilots skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/autopilots-source-map.md") {
+		t.Errorf("autopilots skill missing supporting file references/autopilots-source-map.md")
+	}
+}
+
+func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
+	skill, ok := findSkill(t, "multica-runtimes-and-repos")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"agent_task_queue",
+		"daemon polls/claims the task",
+		"multica runtime list --output json",
+		"multica repo checkout <url>",
+		"MULTICA_DAEMON_PORT",
+		"resource_ref.ref",
+		"github_repo",
+		"local_directory",
+		"Runtime and repo commands affect active agent execution",
+		"references/runtimes-and-repos-source-map.md",
+		// An agent reads this to know whether its checkout can be committed to.
+		// Codex on Linux and Windows gets task-local Git metadata; every other
+		// runtime gets a linked worktree (multica-ai/multica#2925, #6449).
+		"Linux and Windows Codex",
+		"task-local Git metadata",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("runtimes-and-repos skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/runtimes-and-repos-source-map.md") {
+		t.Errorf("runtimes-and-repos skill missing supporting file references/runtimes-and-repos-source-map.md")
+	}
+}
+
+func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
+	skill, ok := findSkill(t, "multica-projects-and-resources")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+	}
+
+	mustContain := []string{
+		"Projects are durable context containers",
+		".multica/project/resources.json",
+		"multica project resource list <project-id> --output json",
+		"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
+		"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
+		"multica project resource add <project-id> --type local_directory",
+		"Project resources are durable and affect future tasks",
+		"github_repo.resource_ref.url",
+		"SSH-config host alias",
+		"local-only",
+		"resource_ref.ref",
+		"references/projects-and-resources-source-map.md",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("projects-and-resources skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/projects-and-resources-source-map.md") {
+		t.Errorf("projects-and-resources skill missing supporting file references/projects-and-resources-source-map.md")
+	}
 }
 
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
@@ -857,6 +952,18 @@ func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	}
 	t.Errorf("built-in skill %q not found", name)
 	return AgentSkillData{}, false
+}
+
+// skillHasFile reports whether the skill ships a supporting file at the given
+// path. Built-in skills load their embedded reference files into Files, so
+// missing source-map files surface here instead of failing at agent runtime.
+func skillHasFile(skill AgentSkillData, path string) bool {
+	for _, f := range skill.Files {
+		if f.Path == path {
+			return true
+		}
+	}
+	return false
 }
 
 // splitFrontmatter returns the top-level scalar keys of a leading YAML

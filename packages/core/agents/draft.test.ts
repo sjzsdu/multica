@@ -21,6 +21,7 @@ const draft = (): AgentDraft => ({
   model: "model-1",
   thinkingLevel: "",
   serviceTier: "",
+  fallbackRuntimes: [],
   skillIds: new Set(["skill-1"]),
   permissionScope: "private",
   memberIds: new Set(),

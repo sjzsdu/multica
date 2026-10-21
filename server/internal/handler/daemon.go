@@ -2540,7 +2540,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// capability buys that daemon a redirect stub under the old name instead of
 	// a dangling pointer. Capability, not version: the version string is only
 	// ever shown to humans.
-	legacySkillRedirects := !requestHasClientCapability(r, protocol.DaemonCapabilityPlatformSkillV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {
 		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -2600,6 +2599,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// Model/thinking/service tier follow the runtime the task was pinned to,
+	// not the agent row unconditionally: a fallback-dispatched task (task
+	// runtime_id != agent.runtime_id) runs the fallback entry's own settings,
+	// because model ids are per-runtime and the primary's model need not exist
+	// on the machine that actually claimed the work.
+	model, thinkingLevel, serviceTier := service.TaskExecutionSettings(agent, *task)
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
@@ -2607,9 +2612,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
-		Model:                 agent.Model.String,
-		ThinkingLevel:         agent.ThinkingLevel.String,
-		ServiceTier:           agent.ServiceTier.String,
+		Model:                 model.String,
+		ThinkingLevel:         thinkingLevel.String,
+		ServiceTier:           serviceTier.String,
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
@@ -2626,7 +2631,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
 	if useSkillRefs {
-		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
+		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String)
 		if err != nil {
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
@@ -2638,7 +2643,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
 		}
 		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills(agent.SystemKey.String, legacySkillRedirects)
+		builtinSkills := h.TaskService.BuiltinSkills(agent.SystemKey.String)
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		resp.Agent.Skills = skills
@@ -3655,8 +3660,26 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
-	// task to a daemon that cannot implement the mode.
+	// Last gates before dispatch: a local_directory is an execution boundary,
+	// not just a hint for picking a workdir. It can run on any runtime belonging
+	// to its daemon, but never on a runtime from another daemon (or a cloud
+	// runtime with no daemon). Check this after every claim path has resolved
+	// project context, so issue, chat, autopilot, and quick-create behave alike.
+	if reason := localDirectoryDaemonClaimBlockReason(resp.ProjectResources, runtime); reason != "" {
+		slog.Error("task claim: runtime is not on the daemon bound to local directory; failing before launch",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"daemon_id", runtime.DaemonID.String,
+			"reason", reason,
+		)
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+			r.Context(), task, reason, taskfailure.ReasonLocalDirectoryError,
+			"error_local_directory_daemon_mismatch", http.StatusUnprocessableEntity, reason,
+		)
+	}
+
+	// Refuse to hand a worktree-mode local_directory task to a daemon that
+	// cannot implement the mode.
 	//
 	// The save-time gate in project_resource.go cannot cover this. It checks the
 	// version at the moment the resource is written; a machine downgraded
@@ -3745,6 +3768,58 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
+}
+
+// localDirectoryDaemonClaimBlockReason returns a user-facing reason when a
+// task carries local_directory resources but the claiming runtime is not
+// attached to one of their daemons. A project can have one local directory per
+// machine, so matching any bound daemon is sufficient; the runtime itself is
+// intentionally not pinned.
+//
+// This is fail-closed. An unreadable or incomplete local resource is a corrupt
+// execution boundary, and treating it as a normal workspace task could write
+// to the wrong repository or machine.
+func localDirectoryDaemonClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime) string {
+	var daemonIDs []string
+	seen := make(map[string]struct{})
+	for _, resource := range resources {
+		if resource.ResourceType != "local_directory" {
+			continue
+		}
+		var ref localDirectoryRef
+		if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+			return "This project's local directory configuration is invalid. Repair the project resource before running this task."
+		}
+		ref.DaemonID = strings.TrimSpace(ref.DaemonID)
+		if ref.DaemonID == "" {
+			return "This project's local directory has no bound daemon. Repair the project resource before running this task."
+		}
+		if _, ok := seen[ref.DaemonID]; ok {
+			continue
+		}
+		seen[ref.DaemonID] = struct{}{}
+		daemonIDs = append(daemonIDs, ref.DaemonID)
+	}
+	if len(daemonIDs) == 0 {
+		return ""
+	}
+
+	currentDaemonID := ""
+	if runtime.DaemonID.Valid {
+		currentDaemonID = strings.TrimSpace(runtime.DaemonID.String)
+	}
+	for _, daemonID := range daemonIDs {
+		if daemonID == currentDaemonID {
+			return ""
+		}
+	}
+	if currentDaemonID == "" {
+		return "This task is bound to a local project directory and cannot run on a cloud or unbound runtime. Start a runtime on the project's bound daemon and run the task again."
+	}
+	return fmt.Sprintf(
+		"This task is bound to a local project directory on daemon %s, but this runtime belongs to daemon %s. Run it from a runtime on the bound daemon instead.",
+		strings.Join(daemonIDs, ", "), currentDaemonID,
+	)
 }
 
 // worktreeClaimBlockReason returns a user-facing reason when this runtime must

@@ -740,6 +740,13 @@
     "usage_help": "Utilisation"
   },
   "workspace": {
+    "storage_section": "Stockage",
+    "storage_migration_label": "Migration des fichiers locaux",
+    "storage_migration_pending": "{{attachments}} pièces jointes et {{avatars}} avatars sont encore sur le disque local de ce serveur.",
+    "storage_migration_running": "Déplacement vers le stockage d'objets… {{migrated}} déplacés, {{failed}} en échec.",
+    "storage_migration_finished": "{{migrated}} fichiers déplacés vers le stockage d'objets, {{failed}} en échec.",
+    "storage_migration_start": "Migrer les fichiers",
+    "storage_migration_start_failed": "Échec du démarrage de la migration du stockage.",
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",

@@ -218,6 +218,9 @@ func TestIsValidGitRepoURL(t *testing.T) {
 		"ssh://git@github.com/multica-ai/multica.git",
 		"ssh://git@github.com:22/multica-ai/multica.git",
 		"git@github.com:multica-ai/multica.git",
+		// Project resources may deliberately use a Host alias from ~/.ssh/config
+		// to select a non-default GitHub identity on the owning daemon.
+		"git@github-work:company/private-repo.git",
 		"git@gitlab.example.com:group/sub/repo.git",
 	}
 	bad := []string{
@@ -244,6 +247,21 @@ func TestIsValidGitRepoURL(t *testing.T) {
 		if isValidGitRepoURL(s) {
 			t.Errorf("isValidGitRepoURL(%q) = true, want false", s)
 		}
+	}
+}
+
+func TestValidateGithubRepoRefPreservesGitHubAccount(t *testing.T) {
+	t.Parallel()
+	normalized, err := validateGithubRepoRef(json.RawMessage(`{"url":"git@github-work:company/repo.git","gh_account":" work-user "}`))
+	if err != nil {
+		t.Fatalf("validateGithubRepoRef: %v", err)
+	}
+	var got githubRepoRef
+	if err := json.Unmarshal(normalized, &got); err != nil {
+		t.Fatalf("decode normalized ref: %v", err)
+	}
+	if got.GitHubAccount != "work-user" {
+		t.Fatalf("gh_account = %q, want trimmed account", got.GitHubAccount)
 	}
 }
 
@@ -1382,6 +1400,45 @@ func TestValidateLocalDirectoryRefExecutionMode(t *testing.T) {
 				t.Errorf("execution_mode %q was accepted, want a validation error", mode)
 			}
 		})
+	}
+}
+
+func TestValidateLocalDirectoryRefSparsePaths(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"local_path":     "/Users/foo/flex",
+		"daemon_id":      "d1",
+		"execution_mode": "worktree",
+		"sparse_paths":   []string{"frontend/flow360-ui-next/", "frontend/graphic/uvf", "frontend/graphic/uvf"},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	out, err := validateLocalDirectoryRef(raw)
+	if err != nil {
+		t.Fatalf("validateLocalDirectoryRef: %v", err)
+	}
+	var got localDirectoryRef
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if strings.Join(got.SparsePaths, ",") != "frontend/flow360-ui-next,frontend/graphic/uvf" {
+		t.Fatalf("SparsePaths = %#v", got.SparsePaths)
+	}
+
+	badCases := []map[string]any{
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "sparse_paths": []string{"frontend/flow360-ui-next"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"/absolute/path"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"../secret"}},
+		{"local_path": "/Users/foo/flex", "daemon_id": "d1", "execution_mode": "worktree", "sparse_paths": []string{"frontend/../secret"}},
+	}
+	for _, bad := range badCases {
+		raw, err := json.Marshal(bad)
+		if err != nil {
+			t.Fatalf("marshal bad: %v", err)
+		}
+		if _, err := validateLocalDirectoryRef(raw); err == nil {
+			t.Fatalf("expected sparse_paths validation error for %#v", bad)
+		}
 	}
 }
 

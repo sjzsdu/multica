@@ -18,9 +18,9 @@ Two resource types are supported today:
 
 When an agent works an issue inside the project, Multica adds the project name, project description, and resource list to the run's context, and writes `.multica/project/resources.json` into the working directory.
 
-The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
+Workspace repositories are a fallback only for projects with neither a `github_repo` nor a `local_directory`. A project's GitHub repositories replace that fallback. A project with a local directory and no GitHub repository is **local-only**: it receives no workspace repository and agents must not push or create a pull request unless you explicitly attach the intended GitHub repository.
 
-A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
+A local directory is an execution boundary, not merely a path hint. A task may run on any runtime registered by one of the daemons that owns a local directory for its project; it cannot run on another daemon or an unbound/cloud runtime. If several computers need to work on one project, attach one local directory for each daemon that is allowed to execute it.
 
 ## Add a GitHub repository
 
@@ -31,6 +31,19 @@ Repositories are not limited to GitHub: any Git URL the runtime can reach works 
 When creating a project, you can also pick repositories directly under **Repos**. One project can link multiple GitHub repositories.
 
 A resource's `ref` sets the branch, tag, or commit that later checkouts use by default. `default_branch_hint` only gives the agent a default-branch hint and does not force a branch switch.
+
+### Use a specific SSH identity
+
+For multiple GitHub accounts, put the SSH host alias from your `~/.ssh/config` directly in this project's Git URL. The project resource is authoritative for its tasks, so checkout and `git push` use that alias instead of the machine's default GitHub host:
+
+```text
+# ~/.ssh/config: Host github-work → HostName github.com, IdentityFile ~/.ssh/id_work
+git@github-work:company/private-repo.git
+```
+
+Add this URL as a custom project resource (or with the CLI below), rather than selecting the same repository from the workspace list with its generic `github.com` URL. This keeps account choice scoped to the project and does not change another project's identity.
+
+For pull-request commands, set the optional **GitHub CLI account** to a username already authenticated on that daemon (`gh auth login`). Multica stores only the username; when this project runs, the daemon resolves that account's token locally and supplies it to that task only. It never runs `gh auth switch`, persists the token, or changes another project's default account. All GitHub repositories in one project should use the same named account.
 
 ## Add a local directory
 
@@ -117,6 +130,12 @@ multica project resource add <project-id> \
   --type github_repo \
   --url https://github.com/multica-ai/multica \
   --ref main
+
+# Bind this project's Git operations to an SSH-config host alias
+multica project resource add <project-id> \
+  --type github_repo \
+  --url git@github-work:company/private-repo.git \
+  --gh-account work-user
 
 # Link a local directory on a specific daemon
 multica project resource add <project-id> \

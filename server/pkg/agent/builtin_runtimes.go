@@ -52,11 +52,11 @@ type BuiltinRuntime struct {
 	LaunchHeader string
 
 	// DefaultExecutable is the binary name the backend falls back to when
-	// cfg.ExecutablePath is empty (passed to piBackend.defaultExecutable).
+	// cfg.ExecutablePath is empty (passed to the protocol backend).
 	DefaultExecutable string
 
 	// ProviderLabel is the label used in log/error messages (passed to
-	// piBackend.providerLabel).
+	// the protocol backend).
 	ProviderLabel string
 
 	// ModelDiscovery is the strategy for discovering available models.
@@ -96,6 +96,32 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		DefaultExecutable: "omp",
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
+	},
+	{
+		ID:                "jcode",
+		ProtocolFamily:    "hermes",
+		DefaultCommand:    "jcode",
+		EnvPrefix:         "MULTICA_JCODE",
+		DisplayName:       "jcode",
+		SkillsDir:         ".jcode/skills",
+		UserSkillsDir:     ".jcode/skills",
+		LaunchHeader:      "jcode acp",
+		DefaultExecutable: "jcode",
+		ProviderLabel:     "jcode",
+		ModelDiscovery:    discoverHermesModels,
+	},
+	{
+		ID:                "openclaude",
+		ProtocolFamily:    "claude",
+		DefaultCommand:    "openclaude",
+		EnvPrefix:         "MULTICA_OPENCLAUDE",
+		DisplayName:       "OpenClaude",
+		SkillsDir:         ".openclaude/skills",
+		UserSkillsDir:     ".openclaude/skills",
+		LaunchHeader:      "openclaude (stream-json)",
+		DefaultExecutable: "openclaude",
+		ProviderLabel:     "openclaude",
+		ModelDiscovery:    discoverOpenClaudeModels,
 	},
 }
 
@@ -140,6 +166,23 @@ type backendOverrideApplicator interface {
 // providerLabel fields. The method is defined here (not in pi.go) to keep
 // the descriptor→backend contract in one file.
 func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+}
+
+// hermesBackend implements the same interface via the same fields. Both
+// families host built-in runtime identities (omp on pi, jcode on hermes)
+// that need their own executable and label.
+func (b *hermesBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
+	b.defaultExecutable = desc.DefaultExecutable
+	b.providerLabel = desc.ProviderLabel
+}
+
+// claudeBackend implements the same stream-json contract as OpenClaude. Keep
+// the runtime-specific executable and label on the backend so a direct
+// NewRuntime call behaves the same as daemon-dispatched execution when the
+// caller does not provide an explicit executable path.
+func (b *claudeBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
 	b.defaultExecutable = desc.DefaultExecutable
 	b.providerLabel = desc.ProviderLabel
 }

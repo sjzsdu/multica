@@ -190,8 +190,8 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
-		if err != nil || !verdict.Ready() {
+		resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(s.Queries), leader)
+		if err != nil || !resolved.Verdict.Ready() {
 			return IssueRunTrigger{}, false
 		}
 		if !canAccess(leader) {

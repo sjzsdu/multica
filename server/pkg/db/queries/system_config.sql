@@ -1,0 +1,11 @@
+-- name: GetSystemConfig :one
+-- Fetch the singleton system-level config row. Always returns one row
+-- (id = 1); the migration guarantees it exists. Used to read the global
+-- fallback runtime an operator has pinned as the last-resort runtime when
+-- every agent-level fallback is blocked.
+--
+-- There is no write query here on purpose: no instance-level admin surface
+-- exists yet, so operators configure the row directly in SQL
+-- (settings.fallback_runtime, see service.SystemFallbackRuntime) until the
+-- settings API lands.
+SELECT * FROM system_config WHERE id = 1;

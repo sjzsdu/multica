@@ -1278,6 +1278,13 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	// Resolve the execution chain (primary → agent fallbacks → system tier)
+	// and pin the task to the runtime admission chose. A DB error here fails
+	// the enqueue, same as the agent load above.
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(), agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("resolve runtime fallback: %w", err)
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1298,7 +1305,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            resolved.RuntimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1450,6 +1457,13 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	// Resolve the execution chain (primary → agent fallbacks → system tier)
+	// and pin the task to the runtime admission chose. A DB error here fails
+	// the enqueue, same as the agent load above.
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(), agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("resolve runtime fallback: %w", err)
+	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
 	// agent-authored comment is a delegation (the parent task's human is
@@ -1469,7 +1483,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            resolved.RuntimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1596,6 +1610,13 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	// Resolve the execution chain (primary → agent fallbacks → system tier)
+	// and pin the task to the runtime admission chose. A DB error here fails
+	// the enqueue, same as the agent load above.
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(), agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("resolve runtime fallback: %w", err)
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -1651,7 +1672,7 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	createParams := db.CreateQuickCreateTaskParams{
 		ID:                   taskID,
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            resolved.RuntimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
 		OriginatorUserID:     requesterID,
@@ -2033,6 +2054,13 @@ func (s *TaskService) enqueueChatTaskTx(
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
+	// Resolve the execution chain (primary → agent fallbacks → system tier)
+	// on the transaction's own connection, and pin the task to the runtime it
+	// chose. A DB error here fails the enqueue, same as the agent reload above.
+	resolved, err := ResolveRuntimeWithFallback(ctx, RuntimeLookup{Queries: qtx, Metrics: s.Metrics, Source: obsmetrics.RuntimeLookupSourceTask}, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("resolve runtime fallback: %w", err)
+	}
 
 	binding, bindingErr := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
@@ -2090,7 +2118,7 @@ func (s *TaskService) enqueueChatTaskTx(
 	task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              chatSession.AgentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            resolved.RuntimeID,
 		Priority:             2,
 		ChatSessionID:        chatSession.ID,
 		InitiatorUserID:      initiatorUserID,
@@ -6922,12 +6950,12 @@ func (s *TaskService) skillsWithFiles(ctx context.Context, skills []db.Skill) ([
 // It fails closed on a workspace-skill read error for the reason in
 // LoadAgentSkills: a bundle set built from a partial read is indistinguishable
 // from a correct one.
-func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, agentSystemKey string, legacyRedirects bool) ([]AgentSkillData, []AgentSkillRefData, error) {
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, agentSystemKey string) ([]AgentSkillData, []AgentSkillRefData, error) {
 	skills, err := s.LoadAgentSkills(ctx, agentID)
 	if err != nil {
 		return nil, nil, err
 	}
-	skills = append(skills, s.BuiltinSkills(agentSystemKey, legacyRedirects)...)
+	skills = append(skills, s.BuiltinSkills(agentSystemKey)...)
 	bundles, refs := BuildAgentSkillBundles(skills)
 	return bundles, refs, nil
 }

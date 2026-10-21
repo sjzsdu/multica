@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -198,6 +200,8 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus))
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
+	sb.WriteString("\n\n")
+	sb.WriteString(buildSquadWorkflowPolicyBriefing(ctx, q, squad))
 
 	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {
 		sb.WriteString("\n\n## Squad Instructions (")
@@ -205,6 +209,57 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 		sb.WriteString(")\n\n")
 		sb.WriteString(trimmed)
 	}
+	return sb.String()
+}
+
+func buildSquadWorkflowPolicyBriefing(ctx context.Context, q *db.Queries, squad db.Squad) string {
+	policy := squadworkflow.DefaultPolicy()
+	if row, err := q.GetSquadWorkflowPolicy(ctx, db.GetSquadWorkflowPolicyParams{
+		SquadID: squad.ID, WorkspaceID: squad.WorkspaceID,
+	}); err == nil {
+		if parsed, parseErr := squadworkflow.Parse(row.Config); parseErr == nil {
+			policy = parsed
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Workflow Policy\n\n")
+	sb.WriteString("This squad uses the following coordination policy; treat it as an execution contract, not optional prose:\n")
+	sb.WriteString("- mode: `")
+	sb.WriteString(string(policy.Mode))
+	sb.WriteString("`\n- child completion signal: `")
+	sb.WriteString(string(policy.ChildCompletionSignal))
+	sb.WriteString("`\n")
+	if policy.MaxActiveChildren > 0 {
+		sb.WriteString("- maximum active children: ")
+		sb.WriteString(strconv.Itoa(policy.MaxActiveChildren))
+		sb.WriteString("\n")
+	}
+	if policy.AutoPromoteStage {
+		sb.WriteString("- stage promotion: coordinator-assisted automatic mode requested; leader still confirms dependencies and gates\n")
+	} else {
+		sb.WriteString("- stage promotion: leader-controlled\n")
+	}
+	if policy.AutoFinalizeParent {
+		sb.WriteString("- parent finalization: automatically move the parent to `in_review` after all gates pass\n")
+	} else {
+		sb.WriteString("- parent finalization: leader-controlled\n")
+	}
+	if policy.RequireTests {
+		sb.WriteString("- required gate: test evidence\n")
+	}
+	if policy.RequireReview {
+		sb.WriteString("- required gate: reviewer approval\n")
+	}
+	if policy.RequireMerge {
+		sb.WriteString("- required gate: integration/merge (`")
+		sb.WriteString(string(policy.MergeMode))
+		sb.WriteString("`)\n")
+	}
+	if policy.HumanApprovalRequired {
+		sb.WriteString("- final approval: human approval required\n")
+	}
+	sb.WriteString("Record evidence for every required gate before moving the parent to `in_review`; never claim a gate passed from an unverified comment.\n")
 	return sb.String()
 }
 

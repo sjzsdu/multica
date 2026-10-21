@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -185,6 +186,11 @@ func (e *IssuePropertyValidationError) Error() string { return e.Message }
 // it arrived, so retrying against the refreshed catalog is the remedy.
 var ErrIssueStatusUnavailable = errors.New("issue status is no longer available")
 
+// ErrActiveChildrenLimitExceeded means a squad workflow has reached its
+// configured active-child capacity. The create transaction is rolled back so
+// the caller can safely retry after an existing child leaves an active state.
+var ErrActiveChildrenLimitExceeded = errors.New("active child limit exceeded")
+
 var ErrSourceContextAlreadyAttached = errors.New("source context is already attached")
 
 // IssueCreateResult is the typed return from IssueService.Create.
@@ -310,8 +316,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	var parent db.Issue
 	if p.ParentIssueID.Valid {
-		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		parent, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
 			WorkspaceID: p.WorkspaceID,
 		})
@@ -369,6 +376,14 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, p.Status)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
+	}
+
+	// IncrementIssueCounter above takes the workspace row lock, which
+	// serializes concurrent issue creates in this workspace. Evaluate the
+	// capacity under that same transaction lock so two simultaneous child
+	// creates cannot both pass the max-active-children check.
+	if err := CheckActiveChildCapacity(ctx, qtx, parent, p.Status, pgtype.UUID{}); err != nil {
+		return IssueCreateResult{}, err
 	}
 
 	var issue db.Issue
@@ -625,6 +640,57 @@ func validateIssueCreateProperties(ctx context.Context, tx pgx.Tx, qtx *db.Queri
 	return encoded, nil
 }
 
+// CheckActiveChildCapacity verifies that an active child can be created or
+// promoted under parent. The caller must hold the workspace workflow-capacity
+// lock when this check participates in a write transaction. excludeID is used
+// by status updates to avoid counting the child being promoted.
+func CheckActiveChildCapacity(ctx context.Context, q *db.Queries, parent db.Issue, newStatus string, excludeID pgtype.UUID) error {
+	if !parent.ID.Valid {
+		return nil
+	}
+	if !parent.AssigneeType.Valid || parent.AssigneeType.String != "squad" || !parent.AssigneeID.Valid {
+		return nil
+	}
+	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID: parent.AssigneeID, WorkspaceID: parent.WorkspaceID,
+	})
+	if err != nil {
+		return nil
+	}
+	row, err := q.GetSquadWorkflowPolicy(ctx, db.GetSquadWorkflowPolicyParams{
+		SquadID: squad.ID, WorkspaceID: squad.WorkspaceID,
+	})
+	if err != nil {
+		return nil
+	}
+	policy, err := squadworkflow.Parse(row.Config)
+	if err != nil || policy.MaxActiveChildren <= 0 {
+		return nil
+	}
+	newStatus = issuestatus.Effective(ctx, q, parent.WorkspaceID, newStatus)
+	if !squadworkflow.IsActiveChildStatus(newStatus) {
+		return nil
+	}
+	children, err := q.ListChildIssues(ctx, parent.ID)
+	if err != nil {
+		return fmt.Errorf("list children for workflow capacity: %w", err)
+	}
+	active := 0
+	for _, child := range children {
+		if excludeID.Valid && child.ID == excludeID {
+			continue
+		}
+		status := issuestatus.Effective(ctx, q, child.WorkspaceID, child.Status)
+		if squadworkflow.IsActiveChildStatus(status) {
+			active++
+		}
+	}
+	if active >= policy.MaxActiveChildren {
+		return fmt.Errorf("%w: maximum %d active children for squad %s", ErrActiveChildrenLimitExceeded, policy.MaxActiveChildren, squad.Name)
+	}
+	return nil
+}
+
 // validateIssueLabels checks that every requested label exists in the
 // workspace and is issue-scoped, returning the de-duplicated label rows to
 // attach. Returning the full rows (not just ids) lets Create echo an
@@ -860,10 +926,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. Custom unstarted statuses do not inherit parking.
-	//
-	// Triage refuses for a different reason and so returns just as quietly: the
-	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -909,9 +972,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
 	// Resolved through q, not s.Queries: this runs inside the create
 	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	// That snapshot is also the only place a just-created Triage issue is
-	// visible, which is why the Triage check belongs on the same read.
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
@@ -936,15 +997,15 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	verdict, err := AgentReadiness(ctx, lookup, agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, lookup, agent)
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	return verdict, !verdict.Blocked()
+	return resolved.Verdict, !resolved.Verdict.Blocked()
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)
@@ -965,11 +1026,11 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
+	resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(s.Queries), agent)
 	if err != nil {
 		return false
 	}
-	return verdict.Ready()
+	return resolved.Verdict.Ready()
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {

@@ -901,8 +901,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// Shared verdict: an unbound agent and a machine whose CLI cannot run are
 	// both refusals here, with their own codes. A merely offline runtime is not
 	// checked at all — chat messages queue for it, as they always have.
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceChat), agent); err == nil && verdict.Blocked() {
-		h.writeDispatchBlocked(w, http.StatusConflict, verdict.Reason)
+	if resolved, err := service.ResolveRuntimeWithFallback(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceChat), agent); err == nil && resolved.Verdict.Blocked() {
+		h.writeDispatchBlocked(w, http.StatusConflict, resolved.Verdict.Reason)
 		return
 	}
 

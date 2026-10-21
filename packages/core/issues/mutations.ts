@@ -1234,3 +1234,23 @@ export function useRetryIssueRun(issueId: string) {
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
   });
 }
+
+export function useWorkflowApproval(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      runId,
+      gate,
+      approved,
+      note,
+    }: {
+      runId: string;
+      gate: "review" | "human_approval";
+      approved: boolean;
+      note?: string;
+    }) => api.upsertIssueWorkflowApproval(issueId, runId, { gate, approved, note }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.workflowRuns(issueId) });
+    },
+  });
+}

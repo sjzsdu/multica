@@ -108,13 +108,52 @@ use S3-compatible object storage instead.
 | `S3_BUCKET` | Bucket name only (e.g. `my-bucket`). Do **not** include the `.s3.<region>.amazonaws.com` suffix — the server constructs the public URL from `S3_BUCKET` + `S3_REGION` |
 | `S3_REGION` | AWS region (default: `us-west-2`). Must match the bucket's actual region — used for both SDK signing and public URLs |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Static credentials. When both are unset, the AWS SDK default credential chain is used |
-| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2). Setting this defaults to path-style URLs for backward compatibility |
-| `S3_USE_PATH_STYLE` | Optional S3 addressing mode. Leave empty for the default (`true` when `AWS_ENDPOINT_URL` is set, `false` for AWS S3). Set `false` for S3-compatible providers that require virtual-hosted-style URLs |
+| `AWS_ENDPOINT_URL` | Custom S3-compatible endpoint (e.g. MinIO, R2, B2, Tencent COS, Aliyun OSS). Setting this defaults to path-style URLs for backward compatibility |
+| `S3_USE_PATH_STYLE` | Optional S3 addressing mode. Leave empty for the default (`true` when `AWS_ENDPOINT_URL` is set, `false` for AWS S3). Set `false` for S3-compatible providers that require virtual-hosted-style URLs (e.g. Tencent COS) |
 | `ATTACHMENT_DOWNLOAD_MODE` | Attachment download behavior: `auto` (default), `cloudfront`, `presign`, or `proxy`. Use `proxy` for private buckets behind Docker/VPC-only endpoints such as `http://rustfs:9000`. Avatars follow the same policy — see below |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | TTL for CloudFront signed URLs and S3 presigned download URLs (default: `30m`) |
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
+
+#### Tencent COS / Aliyun OSS
+
+Both providers expose S3-compatible endpoints, so no code changes are needed —
+configure the existing variables:
+
+**Tencent COS** (virtual-hosted style; the bucket name includes its APPID suffix):
+
+```bash
+S3_BUCKET=my-bucket-1251234567
+S3_REGION=ap-guangzhou
+AWS_ENDPOINT_URL=https://cos.ap-guangzhou.myqcloud.com
+S3_USE_PATH_STYLE=false
+AWS_ACCESS_KEY_ID=<SecretId>
+AWS_SECRET_ACCESS_KEY=<SecretKey>
+```
+
+**Aliyun OSS** (the signing region is the plain region ID, without the `oss-` prefix):
+
+```bash
+S3_BUCKET=my-bucket
+S3_REGION=cn-hangzhou
+AWS_ENDPOINT_URL=https://oss-cn-hangzhou.aliyuncs.com
+AWS_ACCESS_KEY_ID=<AccessKeyId>
+AWS_SECRET_ACCESS_KEY=<AccessKeySecret>
+```
+
+Notes:
+
+- `S3_REGION` is used for SigV4 signing and must match the bucket's real
+  region (`ap-guangzhou` for COS, `cn-hangzhou` for OSS).
+- Path-style defaults to `true` when `AWS_ENDPOINT_URL` is set; COS requires
+  virtual-hosted style, so set `S3_USE_PATH_STYLE=false` explicitly. OSS
+  accepts the default path-style.
+- Both providers reject the SDK's `aws-chunked` checksum encoding; the backend
+  already downgrades the request checksum for non-AWS endpoints, so uploads
+  work without extra configuration.
+- Public object URLs are built from `AWS_ENDPOINT_URL` + `S3_BUCKET`;
+  `CLOUDFRONT_DOMAIN` still overrides them if you put a CDN in front.
 
 #### Avatars on a private bucket
 

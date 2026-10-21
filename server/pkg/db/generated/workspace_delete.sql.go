@@ -614,6 +614,23 @@ func (q *Queries) DeleteWorkspaceRuntimesAndProjects(ctx context.Context, worksp
 	return err
 }
 
+const deleteWorkspaceSquadWorkflowData = `-- name: DeleteWorkspaceSquadWorkflowData :exec
+WITH deleted_approvals AS (
+    DELETE FROM squad_workflow_approval WHERE squad_workflow_approval.workspace_id = $1
+),
+deleted_runs AS (
+    DELETE FROM squad_workflow_run WHERE squad_workflow_run.workspace_id = $1
+)
+DELETE FROM squad_workflow_policy WHERE squad_workflow_policy.workspace_id = $1
+`
+
+// Squad workflow rows carry no foreign key by project rule, so they are
+// swept explicitly before the squads and issues they reference go away.
+func (q *Queries) DeleteWorkspaceSquadWorkflowData(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceSquadWorkflowData, workspaceID)
+	return err
+}
+
 const deleteWorkspaceSquadsAndSkills = `-- name: DeleteWorkspaceSquadsAndSkills :exec
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1

@@ -488,6 +488,20 @@ export interface MikaBootstrapResponse extends Agent {
   onboarding_session?: ChatSession;
 }
 
+/**
+ * One entry in an agent's fallback runtime chain. Each entry names a
+ * runtime + model pair — model ids are per-runtime so an entry must carry
+ * both. thinking_level / service_tier are optional overrides; when omitted
+ * the runtime resolves its own default. The chain is ordered and tried
+ * left-to-right only on AgentBlocked verdicts.
+ */
+export interface AgentFallbackRuntimeEntry {
+  runtime_id: string;
+  model?: string;
+  thinking_level?: string;
+  service_tier?: string;
+}
+
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -611,6 +625,19 @@ export interface Agent {
    * account defaults remain authoritative.
    */
   service_tier?: string;
+  /**
+   * Ordered fallback chain of (runtime_id + model) pairs. When the agent's
+   * primary runtime is blocked (provider quota exhausted, CLI broken, model
+   * missing, ...) the admission resolver walks this list and, if none
+   * resolves, falls through to the system-level singleton configured via
+   * `system_config.settings.fallback_runtime`. Offline runtimes (Waitable
+   * verdict) still queue — falling back to another machine while the first
+   * is just asleep wastes a second execution slot.
+   *
+   * Optional: older backends omit this field, `undefined` is treated as "no
+   * agent-level fallback chain configured".
+   */
+  fallback_runtimes?: AgentFallbackRuntimeEntry[];
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -693,6 +720,13 @@ export interface CreateAgentRequest {
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
+  /**
+   * Ordered fallback chain of (runtime_id + model) pairs. See
+   * `Agent.fallback_runtimes`. Optional; when omitted the agent has no
+   * agent-level fallbacks and the admission resolver jumps straight to
+   * the system-level singleton.
+   */
+  fallback_runtimes?: AgentFallbackRuntimeEntry[];
 }
 
 export interface AgentBuilderSession {
@@ -827,6 +861,14 @@ export interface UpdateAgentRequest {
    * clears it, and a non-empty value stores a runtime-catalog ID.
    */
   service_tier?: string;
+  /**
+   * Ordered fallback chain of (runtime_id + model) pairs. Tri-state
+   * semantics (mirrors thinking_level / composio_toolkit_allowlist):
+   *   - field omitted → no change
+   *   - field present (even as `[]`) → validated and stored wholesale
+   * See `Agent.fallback_runtimes` for the chain semantics.
+   */
+  fallback_runtimes?: AgentFallbackRuntimeEntry[];
 }
 
 /**

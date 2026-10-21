@@ -54,6 +54,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	FallbackRuntimes      []byte      `json:"fallback_runtimes"`
 }
 
 type AgentBuilderDraft struct {
@@ -1481,6 +1482,47 @@ type SquadMember struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type SquadWorkflowApproval struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	SquadID        pgtype.UUID        `json:"squad_id"`
+	ParentIssueID  pgtype.UUID        `json:"parent_issue_id"`
+	ClosedStage    int32              `json:"closed_stage"`
+	Gate           string             `json:"gate"`
+	Approved       bool               `json:"approved"`
+	ApprovedByType string             `json:"approved_by_type"`
+	ApprovedByID   pgtype.UUID        `json:"approved_by_id"`
+	Note           pgtype.Text        `json:"note"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SquadWorkflowPolicy struct {
+	SquadID     pgtype.UUID        `json:"squad_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Config      []byte             `json:"config"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SquadWorkflowRun struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	SquadID       pgtype.UUID        `json:"squad_id"`
+	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
+	ClosedStage   int32              `json:"closed_stage"`
+	NextStage     int32              `json:"next_stage"`
+	State         string             `json:"state"`
+	GateSnapshot  []byte             `json:"gate_snapshot"`
+	AttemptCount  int32              `json:"attempt_count"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseToken    pgtype.UUID        `json:"lease_token"`
+	LastError     pgtype.Text        `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type SysCronExecution struct {
 	ID           pgtype.UUID        `json:"id"`
 	JobName      string             `json:"job_name"`
@@ -1504,6 +1546,12 @@ type SysCronExecution struct {
 	ErrorMsg     pgtype.Text        `json:"error_msg"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SystemConfig struct {
+	ID        int32              `json:"id"`
+	Settings  []byte             `json:"settings"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {

@@ -120,6 +120,11 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
+	// FallbackRuntimes is the agent-level degradation chain consulted by
+	// ResolveRuntimeWithFallback when the primary runtime comes back Blocked.
+	// Each entry carries its own runtime + model pair; the field echoes what
+	// the row stores so clients can round-trip it through the editor.
+	FallbackRuntimes []service.FallbackRuntimeEntry `json:"fallback_runtimes"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -207,6 +212,17 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	// owner-only gate below can decide.
 	composioAllowlist := a.ComposioToolkitAllowlist
 
+	// fallback_runtimes round-trips through the response so the editor can
+	// show the stored chain. An empty chain serializes as [] rather than
+	// null so clients with a strict array schema keep parsing.
+	fallbackRuntimes := []service.FallbackRuntimeEntry{}
+	if len(a.FallbackRuntimes) > 0 {
+		if err := json.Unmarshal(a.FallbackRuntimes, &fallbackRuntimes); err != nil {
+			slog.Warn("failed to unmarshal agent fallback_runtimes", "agent_id", uuidToString(a.ID), "error", err)
+			fallbackRuntimes = []service.FallbackRuntimeEntry{}
+		}
+	}
+
 	return AgentResponse{
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
@@ -233,6 +249,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
+		FallbackRuntimes:         fallbackRuntimes,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -303,9 +320,10 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 // RepoData holds repository information included in claim responses so the
 // daemon can set up worktrees for each workspace repo.
 type RepoData struct {
-	URL         string `json:"url"`
-	Description string `json:"description,omitempty"`
-	Ref         string `json:"ref,omitempty"`
+	URL           string `json:"url"`
+	Description   string `json:"description,omitempty"`
+	Ref           string `json:"ref,omitempty"`
+	GitHubAccount string `json:"gh_account,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a
@@ -1344,6 +1362,13 @@ type CreateAgentRequest struct {
 	// SkillIDs are attached inside the same transaction as the agent row so a
 	// create never becomes visible in a partially configured state.
 	SkillIDs []string `json:"skill_ids"`
+	// FallbackRuntimes is the ordered chain of (runtime_id + model) pairs to
+	// try when the agent's primary runtime is blocked. Each entry must carry
+	// a runtime_id (UUID string); model is optional — when absent the
+	// runtime resolves its own default. The chain is tried left-to-right
+	// only on Blocked verdicts (provider quota exhausted, CLI broken, model
+	// missing, ...); Waitable verdicts (runtime offline) still queue.
+	FallbackRuntimes []service.FallbackRuntimeEntry `json:"fallback_runtimes"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -1573,6 +1598,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// fallback_runtimes validation + serialization. Each entry must name a
+	// runtime that exists in this workspace and differ from the primary
+	// binding below; model is optional. We marshal to JSONB here so the
+	// CreateAgentParams consumes a plain []byte.
+	fallbackRuntimesJSON, err := h.validateAndMarshalFallbackRuntimes(r.Context(), req.FallbackRuntimes, wsUUID, runtime.ID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
@@ -1623,6 +1658,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
+		FallbackRuntimes:         fallbackRuntimesJSON,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1739,6 +1775,11 @@ type UpdateAgentRequest struct {
 	// null" (a *[]string can't, because a nil pointer is the same wire
 	// representation as both). MUL-3869.
 	ComposioToolkitAllowlist *[]string `json:"composio_toolkit_allowlist"`
+	// FallbackRuntimes follows the same tri-state pattern as thinking_level /
+	// composio_toolkit_allowlist:
+	//   - field omitted → no change
+	//   - field present (even as `[]`) → validated and stored wholesale
+	FallbackRuntimes *[]service.FallbackRuntimeEntry `json:"fallback_runtimes"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -2035,6 +2076,22 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+
+		// A primary switch that does not also rewrite fallback_runtimes must
+		// still respect the chain: a stored entry naming the NEW primary would
+		// make fallback == primary (breaking the claim-side model lookup) even
+		// though this request never touched the chain. The caller sees 400 and
+		// can re-send the chain alongside the switch — the fallback_runtimes
+		// branch below then validates the replacement wholesale.
+		if _, hasFallback := rawFields["fallback_runtimes"]; !hasFallback {
+			for _, entry := range service.ParseFallbackRuntimes(existing.FallbackRuntimes) {
+				var entryID pgtype.UUID
+				if entryID.Scan(entry.RuntimeID) == nil && entryID == targetRuntimeID {
+					writeError(w, http.StatusBadRequest, "fallback_runtimes already contains this runtime; update the fallback chain in the same request")
+					return
+				}
+			}
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -2271,6 +2328,28 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// vs empty picker).
 			params.ComposioToolkitAllowlist = normaliseComposioToolkitAllowlist(*req.ComposioToolkitAllowlist)
 		}
+	}
+
+	// fallback_runtimes handling. The COALESCE in UpdateAgent preserves
+	// the column when the field is omitted, so we only touch it when the
+	// wire actually sent the key (rawFields disambiguates omitted from
+	// explicit null — a JSON null is treated as [], the column is NOT NULL).
+	// Validate each entry's runtime_id exists in the workspace, differs from
+	// the runtime that will be in force after this update, and is not
+	// repeated, before storing so the read path can skip blocked entries
+	// without ever hitting a dangling UUID. Validated before the binding
+	// transaction opens so a malformed chain fails fast with 400.
+	if _, hasFallback := rawFields["fallback_runtimes"]; hasFallback {
+		var entries []service.FallbackRuntimeEntry
+		if req.FallbackRuntimes != nil {
+			entries = *req.FallbackRuntimes
+		}
+		fallbackJSON, err := h.validateAndMarshalFallbackRuntimes(r.Context(), entries, existing.WorkspaceID, targetRuntimeID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.FallbackRuntimes = fallbackJSON
 	}
 
 	// Only binding writes need this transaction. Hold the same runtime lock as
@@ -3134,4 +3213,49 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateAndMarshalFallbackRuntimes sanity-checks the agent-level fallback
+// chain and marshals it to the JSONB byte slice the agent row stores.
+// Each entry must name a runtime that exists in this workspace, must not
+// repeat an earlier entry, and must not restate the agent's primary runtime
+// (a duplicate would burn a readiness probe on every trigger, and
+// fallback == primary would make the claim-side model lookup ambiguous);
+// rejecting non-existent runtimes at write time keeps the read path
+// (ResolveRuntimeWithFallback) simple — it just skips blocked entries. The
+// marshal always happens even on an empty list so callers can store a clean
+// `[]` with no extra branch.
+func (h *Handler) validateAndMarshalFallbackRuntimes(
+	ctx context.Context,
+	entries []service.FallbackRuntimeEntry,
+	workspaceID pgtype.UUID,
+	primaryRuntimeID pgtype.UUID,
+) ([]byte, error) {
+	if len(entries) == 0 {
+		return json.Marshal([]service.FallbackRuntimeEntry{})
+	}
+	seen := make(map[pgtype.UUID]struct{}, len(entries))
+	for i, entry := range entries {
+		if entry.RuntimeID == "" {
+			return nil, fmt.Errorf("fallback_runtimes[%d] missing runtime_id", i)
+		}
+		var rtUUID pgtype.UUID
+		if err := rtUUID.Scan(entry.RuntimeID); err != nil {
+			return nil, fmt.Errorf("fallback_runtimes[%d] has invalid runtime_id: %v", i, err)
+		}
+		if primaryRuntimeID.Valid && rtUUID == primaryRuntimeID {
+			return nil, fmt.Errorf("fallback_runtimes[%d] restates the agent's primary runtime", i)
+		}
+		if _, dup := seen[rtUUID]; dup {
+			return nil, fmt.Errorf("fallback_runtimes[%d] repeats an earlier runtime_id", i)
+		}
+		seen[rtUUID] = struct{}{}
+		if _, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+			ID:          rtUUID,
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			return nil, fmt.Errorf("fallback_runtimes[%d] references a runtime that does not exist in this workspace", i)
+		}
+	}
+	return json.Marshal(entries)
 }

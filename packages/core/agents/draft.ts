@@ -1,6 +1,7 @@
 import { isRuntimeUsableForUser } from "../runtimes/access";
 import type {
   Agent,
+  AgentFallbackRuntimeEntry,
   AgentInvocationTargetInput,
   AgentPermissionScope,
   AgentConversationStarter,
@@ -34,6 +35,11 @@ export interface AgentDraft {
   thinkingLevel: string;
   /** Runtime-native execution tier (Codex Speed), scoped to `model`. */
   serviceTier: string;
+  /** Ordered fallback chain of (runtime_id + model) pairs. Tried when
+   *  the primary runtime is blocked (provider quota exhausted, CLI broken,
+   *  model missing, ...). Offline runtimes still queue — see
+   *  ResolveRuntimeWithFallback. */
+  fallbackRuntimes: AgentFallbackRuntimeEntry[];
   skillIds: Set<string>;
   permissionScope: AgentPermissionScope;
   memberIds: Set<string>;
@@ -51,6 +57,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   model: "",
   thinkingLevel: "",
   serviceTier: "",
+  fallbackRuntimes: [],
   skillIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
@@ -197,6 +204,9 @@ export function buildDuplicateDraft(
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
+    // Always copy the fallback chain — it names runtimes independent of the
+    // primary, so losing it on duplicate would silently drop a safety net.
+    fallbackRuntimes: [...(source.fallback_runtimes ?? [])],
     skillIds: new Set(source.skills.map((skill) => skill.id)),
     ...deriveDuplicateAccess(source),
   };
@@ -233,6 +243,9 @@ export function buildCreateAgentRequest(options: {
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
     service_tier: draft.serviceTier.trim() || undefined,
+    ...(draft.fallbackRuntimes.length > 0
+      ? { fallback_runtimes: draft.fallbackRuntimes }
+      : {}),
     permission_mode:
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),
