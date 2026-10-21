@@ -838,7 +838,7 @@ function GithubRepoRow({
   if (editing) {
     return (
       <form
-        className="space-y-1 rounded border p-2 text-caption"
+        className="space-y-1 rounded-md border p-2 text-caption"
         onSubmit={(event) => {
           event.preventDefault();
           if (saving || !url.trim()) return;
@@ -849,8 +849,8 @@ function GithubRepoRow({
             .finally(() => setSaving(false));
         }}
       >
-        <input value={url} onChange={(event) => setUrl(event.target.value)} aria-label={t(($) => $.resources.github_remote_url_label)} className="w-full rounded border bg-transparent px-2 py-1" />
-        <input value={ghAccount} onChange={(event) => setGhAccount(event.target.value)} aria-label={t(($) => $.resources.gh_account_label)} placeholder={t(($) => $.resources.gh_account_placeholder)} className="w-full rounded border bg-transparent px-2 py-1" />
+        <input value={url} onChange={(event) => setUrl(event.target.value)} aria-label={t(($) => $.resources.github_remote_url_label)} className="w-full rounded-md border bg-transparent px-2 py-1" />
+        <input value={ghAccount} onChange={(event) => setGhAccount(event.target.value)} aria-label={t(($) => $.resources.gh_account_label)} placeholder={t(($) => $.resources.gh_account_placeholder)} className="w-full rounded-md border bg-transparent px-2 py-1" />
         <div className="flex justify-end gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>{t(($) => $.resources.edit_cancel)}</Button><Button type="submit" size="sm" disabled={saving}>{t(($) => $.resources.edit_save)}</Button></div>
       </form>
     );
