@@ -23,11 +23,12 @@
 //     attributable to the platform/scheduler/runtime layer rather than
 //     anything the agent process did:
 //
-//     queued_expired, runtime_offline, runtime_reconnect_timeout,
-//     runtime_recovery, timeout, iteration_limit, agent_blocked,
-//     api_invalid_request, skill_bundle_unavailable,
-//     runtime_cli_timeout, environment_prepare_failed,
-//     invalid_task_identity, runtime_access_denied
+//     queued_expired, runtime_offline, runtime_access_revoked,
+//     runtime_reconnect_timeout, runtime_recovery, timeout,
+//     iteration_limit, agent_blocked, api_invalid_request,
+//     skill_bundle_unavailable, runtime_cli_timeout,
+//     environment_prepare_failed, invalid_task_identity,
+//     runtime_access_denied
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -278,7 +279,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of the 29 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //

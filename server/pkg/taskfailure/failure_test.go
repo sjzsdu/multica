@@ -21,6 +21,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		// Platform-side.
 		{ReasonQueuedExpired, "queued_expired"},
 		{ReasonRuntimeOffline, "runtime_offline"},
+		{ReasonRuntimeAccessRevoked, "runtime_access_revoked"},
 		{ReasonRuntimeReconnectTimeout, "runtime_reconnect_timeout"},
 		{ReasonRuntimeRecovery, "runtime_recovery"},
 		{ReasonTimeout, "timeout"},
@@ -50,7 +51,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 28; got != want {
+	if got, want := len(cases), 29; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -72,6 +73,7 @@ func TestIsAgentError(t *testing.T) {
 	platformSide := []Reason{
 		ReasonQueuedExpired,
 		ReasonRuntimeOffline,
+		ReasonRuntimeAccessRevoked,
 		ReasonRuntimeReconnectTimeout,
 		ReasonRuntimeRecovery,
 		ReasonTimeout,
@@ -124,8 +126,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 28 {
-		t.Fatalf("AllReasons() returned %d entries, want 28", len(got))
+	if len(got) != 29 {
+		t.Fatalf("AllReasons() returned %d entries, want 29", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -142,8 +144,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 14 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 14", platformCount)
+	if platformCount != 15 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 15", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
@@ -154,7 +156,8 @@ func TestAllReasonsContents(t *testing.T) {
 	// someone adds a constant but forgets to register it in the
 	// allReasons slice.
 	required := []Reason{
-		ReasonQueuedExpired, ReasonRuntimeOffline, ReasonRuntimeReconnectTimeout,
+		ReasonQueuedExpired, ReasonRuntimeOffline, ReasonRuntimeAccessRevoked,
+		ReasonRuntimeReconnectTimeout,
 		ReasonRuntimeRecovery,
 		ReasonTimeout, ReasonIterationLimit, ReasonAgentBlocked, ReasonLocalDirectoryError,
 		ReasonAPIInvalidRequest, ReasonSkillBundleUnavailable,
