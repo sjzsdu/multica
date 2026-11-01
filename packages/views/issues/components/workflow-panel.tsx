@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, ChevronRight, CircleAlert, Clock3, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { AlertCircle, CheckCircle2, ChevronRight, Clock3, Loader2 } from "@multica/ui/icons";
 import { issueWorkflowRunsOptions } from "@multica/core/issues/queries";
 import { useWorkflowApproval } from "@multica/core/issues/mutations";
 import type { SquadWorkflowRun } from "@multica/core/types";
@@ -63,7 +63,7 @@ export function WorkflowPanel({ issueId }: { issueId: string }) {
         <div className="space-y-2 pl-5 pr-2 text-caption">
           <div className="flex items-start gap-2 text-muted-foreground">
             {latest.state === "failed" || latest.state === "blocked" ? (
-              <CircleAlert className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
             ) : latest.state === "finalized" ? (
               <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
             ) : latest.state === "pending" ? (

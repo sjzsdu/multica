@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Monitor, Plus, Trash2 } from "lucide-react";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
+import { ArrowDown, ArrowUp, Monitor, Plus, Trash2 } from "@multica/ui/icons";
 import type {
   AgentFallbackRuntimeEntry,
   AgentRuntime,
