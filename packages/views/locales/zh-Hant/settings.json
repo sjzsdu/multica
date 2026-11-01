@@ -735,6 +735,13 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "storage_section": "儲存",
+    "storage_migration_label": "本地檔案遷移",
+    "storage_migration_pending": "還有 {{attachments}} 個附件和 {{avatars}} 個頭像儲存在伺服器本地磁碟上。",
+    "storage_migration_running": "正在遷移到物件儲存……已遷移 {{migrated}} 個，失敗 {{failed}} 個。",
+    "storage_migration_finished": "已將 {{migrated}} 個檔案遷移到物件儲存，失敗 {{failed}} 個。",
+    "storage_migration_start": "遷移檔案",
+    "storage_migration_start_failed": "啟動儲存遷移失敗。",
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",

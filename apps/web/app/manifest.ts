@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 
+export const dynamic = "force-static";
+
 /**
  * Installable web manifest. Start at /inbox so session-aware proxy routing
  * opens the workspace or login; the marketing host's root would open the landing

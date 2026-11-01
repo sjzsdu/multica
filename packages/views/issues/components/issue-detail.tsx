@@ -115,6 +115,7 @@ import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
 import { IssueInboxRestoreButton } from "./issue-inbox-restore-button";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
+import { WorkflowPanel } from "./workflow-panel";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
@@ -3053,6 +3054,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
       {/* Execution summary owns its query, realtime updates and disclosure. */}
       <ExecutionLogSection issueId={id} identifier={issue.identifier} issueTitle={issue.title} />
+      <WorkflowPanel issueId={id} />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values

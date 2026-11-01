@@ -6,10 +6,22 @@ import {
   countUnreadChatSessions,
   isTaskMessageTaskId,
   mergeTaskMessagesBySeq,
+  pendingChatTaskRefetchInterval,
   sortChatSessions,
   taskMessagesOptions,
   unionTaskMessagesBySeq,
 } from "./queries";
+
+describe("pendingChatTaskRefetchInterval", () => {
+  it("polls only while a task is pending", () => {
+    expect(pendingChatTaskRefetchInterval({
+      task_id: "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc",
+      status: "dispatched",
+    })).toBe(5_000);
+    expect(pendingChatTaskRefetchInterval({})).toBe(false);
+    expect(pendingChatTaskRefetchInterval(undefined)).toBe(false);
+  });
+});
 
 const msg = (seq: number): TaskMessagePayload => ({
   task_id: "task-1",

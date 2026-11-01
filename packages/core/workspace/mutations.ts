@@ -94,6 +94,22 @@ export function useDeleteWorkspace() {
 }
 
 /**
+ * Starts a local→object-store storage migration run (owner/admin only).
+ * Invalidating the status key re-fetches immediately, and the status query
+ * then polls on its own while the server reports running.
+ */
+export function useStartStorageMigration(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.startStorageMigration(),
+    onSettled: () =>
+      queryClient.invalidateQueries({
+        queryKey: workspaceKeys.storageMigration(wsId),
+      }),
+  });
+}
+
+/**
  * Adds a server to the workspace library. It is assigned to no agent: an
  * agent owner gives it to their agent separately.
  */

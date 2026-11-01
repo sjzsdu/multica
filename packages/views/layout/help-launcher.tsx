@@ -27,7 +27,6 @@ import { docsLocalePrefix } from "../common/docs-locale";
 import { RAIL_ICON_BUTTON_CLASS } from "./rail-styles";
 import { CHANGELOG_URL, DOCS_URL, DOWNLOAD_URL } from "./help-links";
 
-
 export function HelpLauncher() {
   const { t, i18n } = useT("layout");
   const serverVersion = useConfigStore((state) => state.serverVersion);

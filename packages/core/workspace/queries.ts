@@ -21,6 +21,8 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  storageMigration: (wsId: string) =>
+    ["workspaces", wsId, "storage-migration"] as const,
 };
 
 export function workspaceListOptions() {
@@ -42,6 +44,20 @@ export function memberListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.members(wsId),
     queryFn: () => api.listMembers(wsId),
+  });
+}
+
+/**
+ * Local→object-store storage migration status (owner/admin only — a member's
+ * request 403s, so callers gate `enabled` on the role). Polls only while a
+ * run is in flight; status is otherwise static.
+ */
+export function storageMigrationOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.storageMigration(wsId),
+    queryFn: () => api.getStorageMigrationStatus(),
+    refetchInterval: (query) =>
+      query.state.data?.state?.running ? 1000 : false,
   });
 }
 

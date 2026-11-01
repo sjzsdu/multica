@@ -3,16 +3,19 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -36,6 +39,7 @@ type SquadResponse struct {
 	ArchivedBy    *string                      `json:"archived_by"`
 	MemberCount   int                          `json:"member_count"`
 	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
+	Workflow      squadworkflow.Policy         `json:"workflow"`
 }
 
 type SquadMemberPreviewResponse struct {
@@ -75,6 +79,7 @@ func (h *Handler) squadToResponse(s db.Squad) SquadResponse {
 		ArchivedAt:    timestampToPtr(s.ArchivedAt),
 		ArchivedBy:    uuidToPtr(s.ArchivedBy),
 		MemberPreview: []SquadMemberPreviewResponse{},
+		Workflow:      squadworkflow.DefaultPolicy(),
 	}
 }
 
@@ -178,6 +183,7 @@ func (h *Handler) loadSquadMemberSummary(ctx context.Context, squadID pgtype.UUI
 
 func (h *Handler) squadToResponseWithPreview(ctx context.Context, squad db.Squad) (SquadResponse, error) {
 	resp := h.squadToResponse(squad)
+	resp.Workflow = h.loadSquadWorkflowPolicy(ctx, squad)
 	summary, err := h.loadSquadMemberSummary(ctx, squad.ID)
 	if err != nil {
 		return resp, err
@@ -205,6 +211,7 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list squad member preview")
 		return
 	}
+	workflowPolicies := h.workflowPoliciesBySquad(r.Context(), wsUUID)
 	summaries := make(map[string]*squadMemberSummary, len(squads))
 	for _, row := range previewRows {
 		squadID := uuidToString(row.SquadID)
@@ -219,6 +226,9 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 	resp := make([]SquadResponse, len(squads))
 	for i, s := range squads {
 		resp[i] = h.squadToResponse(s)
+		if policy, ok := workflowPolicies[uuidToString(s.ID)]; ok {
+			resp[i].Workflow = policy
+		}
 		applySquadMemberSummary(&resp[i], summaries[uuidToString(s.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -235,10 +245,11 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name        string  `json:"name"`
-		Description string  `json:"description"`
-		LeaderID    string  `json:"leader_id"`
-		AvatarURL   *string `json:"avatar_url"`
+		Name        string           `json:"name"`
+		Description string           `json:"description"`
+		LeaderID    string           `json:"leader_id"`
+		AvatarURL   *string          `json:"avatar_url"`
+		Workflow    *json.RawMessage `json:"workflow"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -260,6 +271,15 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
 		return
+	}
+	var workflowConfig []byte
+	if req.Workflow != nil {
+		var err error
+		workflowConfig, _, err = squadworkflow.Merge(nil, *req.Workflow)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid workflow configuration: "+err.Error())
+			return
+		}
 	}
 
 	// Validate leader is an agent in this workspace.
@@ -307,6 +327,14 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		MemberID:   leaderUUID,
 		Role:       "leader",
 	})
+	if workflowConfig != nil {
+		if _, err := h.Queries.UpsertSquadWorkflowPolicy(r.Context(), db.UpsertSquadWorkflowPolicyParams{
+			SquadID: squad.ID, WorkspaceID: squad.WorkspaceID, Config: workflowConfig,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save workflow configuration")
+			return
+		}
+	}
 
 	resp, err := h.squadToResponseWithPreview(r.Context(), squad)
 	if err != nil {
@@ -357,11 +385,12 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name         *string `json:"name"`
-		Description  *string `json:"description"`
-		Instructions *string `json:"instructions"`
-		LeaderID     *string `json:"leader_id"`
-		AvatarURL    *string `json:"avatar_url"`
+		Name         *string          `json:"name"`
+		Description  *string          `json:"description"`
+		Instructions *string          `json:"instructions"`
+		LeaderID     *string          `json:"leader_id"`
+		AvatarURL    *string          `json:"avatar_url"`
+		Workflow     *json.RawMessage `json:"workflow"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -384,6 +413,24 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.AvatarUrl = pgtype.Text{String: accepted, Valid: true}
+	}
+	var workflowConfig []byte
+	if req.Workflow != nil {
+		var current []byte
+		stored, err := h.Queries.GetSquadWorkflowPolicy(r.Context(), db.GetSquadWorkflowPolicyParams{
+			SquadID: squad.ID, WorkspaceID: squad.WorkspaceID,
+		})
+		if err == nil {
+			current = stored.Config
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to load workflow configuration")
+			return
+		}
+		workflowConfig, _, err = squadworkflow.Merge(current, *req.Workflow)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid workflow configuration: "+err.Error())
+			return
+		}
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -452,6 +499,14 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update squad")
 		return
+	}
+	if workflowConfig != nil {
+		if _, err := qtx.UpsertSquadWorkflowPolicy(r.Context(), db.UpsertSquadWorkflowPolicyParams{
+			SquadID: updated.ID, WorkspaceID: updated.WorkspaceID, Config: workflowConfig,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update workflow configuration")
+			return
+		}
 	}
 	var pausedAutopilots []db.Autopilot
 	if req.LeaderID != nil && !newLeaderRuntimeBound {

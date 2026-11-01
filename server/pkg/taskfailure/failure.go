@@ -23,8 +23,10 @@
 //     attributable to the platform/scheduler/runtime layer rather than
 //     anything the agent process did:
 //
-//     queued_expired, runtime_offline, runtime_reconnect_timeout,
-//     runtime_recovery, timeout, iteration_limit, agent_blocked,
+//     queued_expired, runtime_offline, runtime_access_revoked,
+//     runtime_reconnect_timeout, runtime_recovery, timeout,
+//     cleanup_unconfirmed, cleanup_blocked,
+//     iteration_limit, agent_blocked, local_directory_error,
 //     api_invalid_request, skill_bundle_unavailable,
 //     runtime_cli_timeout, environment_prepare_failed,
 //     invalid_task_identity, runtime_access_denied
@@ -109,6 +111,13 @@ const (
 	// 'blocked' workflow state (e.g. requesting human input). Not a
 	// system error.
 	ReasonAgentBlocked Reason = "agent_blocked"
+
+	// ReasonLocalDirectoryError: a task's daemon-bound local project
+	// directory could not be used safely (for example, the claiming runtime
+	// belongs to a different daemon). This is deterministic configuration
+	// failure, so retrying it without changing project/runtime routing is not
+	// useful.
+	ReasonLocalDirectoryError Reason = "local_directory_error"
 
 	// ReasonAPIInvalidRequest: the upstream LLM API rejected the
 	// request body with a 400 invalid_request_error (oversized image,
@@ -277,7 +286,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of the 31 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -298,6 +307,7 @@ var allReasons = []Reason{
 	ReasonProcessCleanupBlocked,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
+	ReasonLocalDirectoryError,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,

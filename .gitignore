@@ -46,6 +46,8 @@ server/tmp/
 server/migrate
 server/daemon
 server/multica
+server/cmd/multica/web_dist/*
+!server/cmd/multica/web_dist/README.txt
 
 # Test artifacts
 test-results/
@@ -59,6 +61,7 @@ apps/web/test-results/
 # local settings
 .claude/
 .tool-versions
+.trae/
 
 # feature tracking
 _features/
@@ -81,3 +84,16 @@ __pycache__/
 perf-report/
 # The production example is a tracked template; `.env*` above would hide it.
 !apps/mobile/.env.production.example
+
+# Local AI/config state
+.tt/
+ai-docs
+
+# Archify-generated visual-check artifacts (keep .json source, ignore rendered outputs)
+docs/*.visual-check.*
+docs/*.visual-check.html
+docs/*.html
+!docs/*.json
+
+.freebuff
+.workbuddy

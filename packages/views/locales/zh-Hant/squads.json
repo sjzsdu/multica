@@ -88,7 +88,8 @@
     "recent_work": "近期工作",
     "recent_work_empty": "還沒有指派給這個小隊的任務。",
     "member_menu": "{{name}} 的操作",
-    "working_on": "正在處理"
+    "working_on": "正在處理",
+    "workflow": "工作流"
   },
   "details": {
     "leader": "隊長",
@@ -109,7 +110,8 @@
     "leader_updated": "隊長已更新",
     "leader_update_failed": "更新隊長失敗",
     "archive_failed": "歸檔小隊失敗",
-    "instructions_saved": "指引已儲存"
+    "instructions_saved": "指引已儲存",
+    "workflow_settings_saved": "工作流設定已儲存"
   },
   "profile_card": {
     "unavailable": "小隊不可用",
@@ -124,6 +126,30 @@
     "unsaved_changes": "有未儲存的修改",
     "save_button": "儲存",
     "placeholder": "例如：始終先編寫失敗測試。提交應保持小而獨立。"
+  },
+  "workflow_tab": {
+    "title": "工作流策略",
+    "description": "控制小隊如何推進子任務，以及何時收斂父任務。",
+    "mode_label": "模式",
+    "mode_manual": "手動",
+    "mode_staged": "分階段",
+    "mode_delivery": "交付",
+    "max_active_children_label": "最大活動子任務數",
+    "unlimited_hint": "0 表示不限制。",
+    "auto_promote_label": "自動推進階段",
+    "auto_promote_description": "當前階段通過門禁後自動啟動下一階段。",
+    "auto_finalize_label": "自動將父任務移至待審查",
+    "auto_finalize_description": "所有階段和門禁通過後將父任務移至待審查，不會自動標記為完成。",
+    "require_tests_label": "要求測試",
+    "require_tests_description": "推進前必須有通過的測試或檢查訊號。",
+    "require_review_label": "要求審查",
+    "require_review_description": "必須有審查訊號或人工審查批准。",
+    "require_merge_label": "要求合併",
+    "require_merge_description": "必須已合併，或滿足選定的合併策略。",
+    "human_approval_label": "要求人工審批",
+    "human_approval_description": "暫停工作流，直到成員批准該階段。",
+    "changes_hint": "設定會套用於新的工作流推進和重試。",
+    "save_button": "儲存"
   },
   "scope": {
     "mine": "我的小隊",

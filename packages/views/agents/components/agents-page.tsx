@@ -23,6 +23,8 @@ import {
   VISIBILITY_TOOLTIP,
   type AgentPresenceDetail,
 } from "@multica/core/agents";
+import { useUpdateAgent } from "@multica/core/agents/mutations";
+import { toast } from "sonner";
 import {
   type AgentListFilters,
   useAgentsViewStore,
@@ -38,7 +40,12 @@ import {
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
-import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import {
+  isRuntimeUsableForUser,
+  runtimeDisplayLabel,
+  runtimeListOptions,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -71,6 +78,12 @@ import {
   AgentListFilterMenu,
   countActiveFilterDimensions,
 } from "./agent-list-toolbar";
+import { ModelPicker } from "./inspector/model-picker";
+import {
+  buildModelChangeUpdate,
+  type ModelCatalog,
+} from "./inspector/model-change-cleanup";
+import { RuntimePicker } from "./inspector/runtime-picker";
 import { useLocale, useT } from "../../i18n";
 
 export interface AgentListRow {
@@ -325,24 +338,173 @@ export function AccessCell({ row }: { row: AgentListRow }) {
   return <span className="min-w-0 truncate">{label}</span>;
 }
 
-function RuntimeCell({ row }: { row: AgentListRow }) {
+function RuntimeCell({
+  row,
+  runtimes,
+  members,
+  currentUserId,
+}: {
+  row: AgentListRow;
+  runtimes: AgentRuntime[];
+  members: MemberWithUser[];
+  currentUserId: string | null;
+}) {
   const { t } = useT("agents");
-  if (!isAgentRuntimeBound(row.agent)) {
-    return (
-      <span className="truncate text-amber-600 dark:text-amber-400">
-        {t(($) => $.row.needs_runtime)}
-      </span>
-    );
-  }
-  const runtime = row.runtime;
-  if (!runtime) return <CollectionEmptyValue />;
-  // Provider mark before the label: scanning this column for "which of these
-  // run on Codex" is a shape match, not a read.
-  return (
+  const updateAgent = useUpdateAgent();
+  const { agent, runtime, canManage } = row;
+
+  const inner = !isAgentRuntimeBound(agent) ? (
+    <span className="truncate text-amber-600 dark:text-amber-400">
+      {t(($) => $.row.needs_runtime)}
+    </span>
+  ) : runtime ? (
+    // Provider mark before the label: scanning this column for "which of
+    // these run on Codex" is a shape match, not a read.
     <>
-      <ProviderLogo provider={runtime.provider} className="h-3.5 w-3.5 shrink-0" />
+      <ProviderLogo
+        provider={runtime.provider}
+        className="h-3.5 w-3.5 shrink-0"
+      />
       <span className="min-w-0 truncate">{runtimeDisplayLabel(runtime)}</span>
     </>
+  ) : (
+    <CollectionEmptyValue />
+  );
+
+  if (!canManage) return inner;
+
+  return (
+    <RuntimePicker
+      value={agent.runtime_id}
+      runtimes={runtimes}
+      members={members}
+      currentUserId={currentUserId}
+      // The cell keeps the column's established rendering; the picker
+      // lends its popover, two-level machine navigation, and locked-state
+      // handling underneath it. Unbound agents open the same picker, so a
+      // runtime can be bound straight from the list.
+      renderTrigger={({ title }) => (
+        <button
+          type="button"
+          aria-label={title}
+          className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent"
+        >
+          {inner}
+        </button>
+      )}
+      onChange={(runtimeId) => {
+        // Model, thinking level, and service tier are runtime/model
+        // native. Clear them together so the new runtime resolves its own
+        // defaults instead of inheriting incompatible tokens — the same
+        // rule as the inspector's runtime field.
+        updateAgent.mutate(
+          {
+            id: agent.id,
+            data: {
+              runtime_id: runtimeId,
+              model: "",
+              thinking_level: "",
+              service_tier: "",
+            },
+          },
+          {
+            onError: (error) =>
+              toast.error(
+                error instanceof Error && error.message
+                  ? error.message
+                  : t(($) => $.detail.update_failed_toast),
+              ),
+          },
+        );
+      }}
+    />
+  );
+}
+
+// Model column. Managers get the inspector's model picker under the plain
+// model id — search, custom ids, and the per-model thinking/tier cleanup all
+// stay shared with the settings form; everyone else sees the value.
+function ModelCell({
+  row,
+  currentUserId,
+}: {
+  row: AgentListRow;
+  currentUserId: string | null;
+}) {
+  const { t } = useT("agents");
+  const updateAgent = useUpdateAgent();
+  const { agent, runtime, canManage } = row;
+
+  // Same discovery gate as the inspector: an offline or foreign runtime
+  // reports no authoritative catalog, so `null` must not trigger clears.
+  const canDiscoverRuntimeModels =
+    runtime != null &&
+    runtime.status === "online" &&
+    isRuntimeUsableForUser(runtime, currentUserId);
+
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(canDiscoverRuntimeModels ? agent.runtime_id : null),
+  );
+  const modelCatalog = useMemo<ModelCatalog>(
+    () =>
+      modelsQuery.isSuccess
+        ? modelsQuery.data.supported
+          ? modelsQuery.data.models
+          : []
+        : null,
+    [modelsQuery.data, modelsQuery.isSuccess],
+  );
+
+  const value = agent.model || "";
+  const displayValue = value || "—";
+
+  if (!canManage) {
+    return (
+      <TruncatedTooltip content={agent.model || undefined}>
+        <span className="min-w-0 truncate">{displayValue}</span>
+      </TruncatedTooltip>
+    );
+  }
+
+  return (
+    <ModelPicker
+      runtimeId={agent.runtime_id}
+      runtimeOnline={canDiscoverRuntimeModels}
+      value={value}
+      renderTrigger={({ title }) => (
+        <button
+          type="button"
+          aria-label={title}
+          className="flex w-full min-w-0 cursor-pointer items-center rounded-xs px-1 py-0.5 text-left transition-colors hover:bg-accent"
+        >
+          <TruncatedTooltip content={agent.model || undefined}>
+            <span className="min-w-0 truncate">{displayValue}</span>
+          </TruncatedTooltip>
+        </button>
+      )}
+      onChange={(model) => {
+        updateAgent.mutate(
+          {
+            id: agent.id,
+            data: buildModelChangeUpdate({
+              provider: runtime?.provider ?? "",
+              model,
+              thinkingLevel: agent.thinking_level ?? "",
+              serviceTier: agent.service_tier ?? "",
+              catalog: modelCatalog,
+            }),
+          },
+          {
+            onError: (error) =>
+              toast.error(
+                error instanceof Error && error.message
+                  ? error.message
+                  : t(($) => $.detail.update_failed_toast),
+              ),
+          },
+        );
+      }}
+    />
   );
 }
 
@@ -577,17 +739,26 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         header: t(($) => $.columns.runtime),
         width: 152,
         hideable: true,
-        cell: (row) => <RuntimeCell row={row} />,
+        // The inline runtime picker owns the click; row navigation would
+        // fire before the popover opens.
+        interactive: true,
+        cell: (row) => (
+          <RuntimeCell
+            row={row}
+            runtimes={runtimes}
+            members={members}
+            currentUserId={currentUser?.id ?? null}
+          />
+        ),
       },
       {
         key: "model",
         header: t(($) => $.columns.model),
         width: 140,
         hideable: true,
+        interactive: true,
         cell: (row) => (
-          <TruncatedTooltip content={row.agent.model || undefined}>
-            <span className="min-w-0 truncate">{row.agent.model || "—"}</span>
-          </TruncatedTooltip>
+          <ModelCell row={row} currentUserId={currentUser?.id ?? null} />
         ),
       },
       {
@@ -621,7 +792,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         ),
       },
     ],
-    [t, locale],
+    [t, locale, runtimes, members, currentUser],
   );
 
   const sort: CollectionSort = {

@@ -740,6 +740,13 @@
     "usage_help": "Usage"
   },
   "workspace": {
+    "storage_section": "Storage",
+    "storage_migration_label": "Local file migration",
+    "storage_migration_pending": "{{attachments}} {{attachments_noun}} and {{avatars}} {{avatars_noun}} still live on this server's local disk.",
+    "storage_migration_running": "Moving {{files_noun}} to object storage… {{migrated}} moved, {{failed}} failed.",
+    "storage_migration_finished": "Moved {{migrated}} {{files_noun}} to object storage, {{failed}} failed.",
+    "storage_migration_start": "Migrate files",
+    "storage_migration_start_failed": "Failed to start the storage migration.",
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",

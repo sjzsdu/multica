@@ -583,6 +583,9 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		}
 	}
 
+	if err := ensureDaemonAuthFromLocalState(cmd, profile); err != nil {
+		return err
+	}
 	if err := requireDaemonAuth(profile); err != nil {
 		return err
 	}

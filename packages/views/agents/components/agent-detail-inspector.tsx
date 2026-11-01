@@ -32,6 +32,7 @@ import { ConversationStartersEditor } from "./conversation-starters-editor";
 import { NewChatPreview } from "./new-chat-preview";
 import { useConversationStartersFocus } from "./use-conversation-starters-focus";
 import { ModelPicker } from "./inspector/model-picker";
+import { FallbackRuntimesField } from "./inspector/fallback-runtimes-field";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
@@ -343,6 +344,23 @@ export function AgentDetailInspector({
                       update({ service_tier: serviceTier })
                     }
                   />
+                  <SettingsRow
+                    label={t(($) => $.inspector.prop_fallback_runtimes)}
+                    description={t(($) => $.inspector.fallback_hint)}
+                    size="none"
+                    align="start"
+                  >
+                    <FallbackRuntimesField
+                      value={agent.fallback_runtimes ?? []}
+                      primaryRuntimeId={agent.runtime_id}
+                      runtimes={runtimes}
+                      currentUserId={currentUserId}
+                      canEdit={canEdit}
+                      onChange={(entries) =>
+                        update({ fallback_runtimes: entries })
+                      }
+                    />
+                  </SettingsRow>
                 </>
               )}
               <SettingsRow
