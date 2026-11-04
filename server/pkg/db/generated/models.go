@@ -1624,14 +1624,16 @@ type TaskSupplementCapability struct {
 }
 
 type TaskToken struct {
-	ID          pgtype.UUID        `json:"id"`
-	TokenHash   string             `json:"token_hash"`
-	TaskID      pgtype.UUID        `json:"task_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID           pgtype.UUID        `json:"id"`
+	TokenHash    string             `json:"token_hash"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	DispatchedAt pgtype.Timestamptz `json:"dispatched_at"`
+	RevokedAt    pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type TaskUsage struct {

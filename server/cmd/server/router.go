@@ -1685,6 +1685,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// against it. Sits in the user-scoped group for that reason: there is
 		// no workspace in the path to gate on.
 		// --- User-scoped routes (no workspace context required) ---
+		// Read-only identity probe for the daemon: after a claim it calls this
+		// with the freshly minted mat_ token to prove the token it is about to
+		// inject into the agent process belongs to the claimed task.
+		r.Get("/api/task-token/whoami", h.TaskTokenWhoami)
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)

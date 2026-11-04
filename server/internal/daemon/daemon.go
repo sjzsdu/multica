@@ -3,6 +3,8 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -273,6 +275,10 @@ type terminalTaskReport struct {
 	// run on the issue or chat can select it again, however many clean rows
 	// still reference it.
 	retiredSessionID string
+	// dispatchedAt is the claim generation this report belongs to (RFC3339Nano,
+	// copied from Task.DispatchedAt). The server revokes only task tokens minted
+	// at or before it, so a stale reclaim's newer token survives this callback.
+	dispatchedAt string
 }
 
 type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
@@ -450,6 +456,12 @@ type Daemon struct {
 	terminalReportNow    func() time.Time
 	terminalReportMu     sync.Mutex
 	terminalReportFlight map[string]struct{}
+
+	// taskTokenMu guards taskTokenOwners, the in-process map of active
+	// MULTICA_TOKEN fingerprint -> task id. It catches an environment leak
+	// where one task's token would be injected into another task's child.
+	taskTokenMu     sync.Mutex
+	taskTokenOwners map[string]string
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -5431,7 +5443,41 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			if taskTarget == "" && t.ChatSessionID != "" {
 				taskTarget = "chat:" + t.ChatSessionID
 			}
-			d.logger.Info("task received", "task", t.ID, "target", taskTarget)
+			d.logger.Info("task received",
+				"task_id", t.ID,
+				"target", taskTarget,
+				"token_fingerprint", taskTokenFingerprint(t.AuthToken),
+				"dispatched_at", t.DispatchedAt,
+			)
+			// Guard against a leaked/reused MULTICA_TOKEN before a slot is handed
+			// to the agent loop. Both checks fail closed and never fall back to
+			// the daemon's mul_ profile credential.
+			if t.AuthToken != "" {
+				bindLog := d.logger.With("task_id", t.ID, "token_fingerprint", taskTokenFingerprint(t.AuthToken), "dispatched_at", t.DispatchedAt)
+				if err := d.registerTaskTokenOwner(t); err != nil {
+					bindLog.Error("task token already owned by another task; refusing to start",
+						"event", "token_binding_mismatch", "error", err)
+					d.reportTaskTokenBindingFailure(parentCtx, t, bindLog, "token_binding_mismatch: "+err.Error(), true)
+					sem <- slot
+					signalPollerWakeup(wakeup)
+					continue
+				}
+				if err := d.verifyTaskTokenBinding(parentCtx, t); err != nil {
+					mismatch := errors.Is(err, errTaskTokenBindingMismatch)
+					if mismatch {
+						bindLog.Error("task token binding mismatch; refusing to start",
+							"event", "token_binding_mismatch", "error", err)
+					} else {
+						bindLog.Error("task token binding check failed; refusing to start",
+							"event", "token_binding_check_failed", "error", err)
+					}
+					d.unregisterTaskTokenOwner(t)
+					d.reportTaskTokenBindingFailure(parentCtx, t, bindLog, err.Error(), mismatch)
+					sem <- slot
+					signalPollerWakeup(wakeup)
+					continue
+				}
+			}
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
@@ -5442,6 +5488,9 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 				cache.CancelMaintenance()
 			}
 			go func(t Task, slot int) {
+				if t.AuthToken != "" {
+					defer d.unregisterTaskTokenOwner(t)
+				}
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
 				defer func() {
@@ -5667,6 +5716,91 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
+// errTaskTokenBindingMismatch marks a task whose mat_ token belongs to a
+// different task. It is never retried: retrying would just repeat the same
+// cross-task credential injection.
+var errTaskTokenBindingMismatch = errors.New("task token binding mismatch")
+
+// taskTokenFingerprint is the first 8 hex chars of sha256(token), identical to
+// the server's fingerprint derivation. Never log the token itself.
+func taskTokenFingerprint(token string) string {
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// registerTaskTokenOwner records the fingerprint as owned by this task and
+// rejects a token already claimed by a different task. This is the local
+// backstop for an environment leak that the server-side whoami check cannot
+// see.
+func (d *Daemon) registerTaskTokenOwner(task Task) error {
+	fp := taskTokenFingerprint(task.AuthToken)
+	if fp == "" {
+		return errors.New("task token is empty")
+	}
+	d.taskTokenMu.Lock()
+	defer d.taskTokenMu.Unlock()
+	if d.taskTokenOwners == nil {
+		d.taskTokenOwners = make(map[string]string)
+	}
+	if owner, ok := d.taskTokenOwners[fp]; ok && owner != task.ID {
+		return fmt.Errorf("token %s is already registered to task %s, not %s", fp, owner, task.ID)
+	}
+	d.taskTokenOwners[fp] = task.ID
+	return nil
+}
+
+func (d *Daemon) unregisterTaskTokenOwner(task Task) {
+	fp := taskTokenFingerprint(task.AuthToken)
+	if fp == "" {
+		return
+	}
+	d.taskTokenMu.Lock()
+	defer d.taskTokenMu.Unlock()
+	if owner, ok := d.taskTokenOwners[fp]; ok && owner == task.ID {
+		delete(d.taskTokenOwners, fp)
+	}
+}
+
+// verifyTaskTokenBinding proves the token about to be injected belongs to the
+// claimed task. The server's whoami endpoint ignores the daemon credential and
+// answers for the task token itself, so a mismatch is caught before spawning an
+// agent with another task's credentials.
+func (d *Daemon) verifyTaskTokenBinding(ctx context.Context, task Task) error {
+	if !strings.HasPrefix(task.AuthToken, "mat_") {
+		return fmt.Errorf("%w: claimed task token is not task-scoped", errTaskTokenBindingMismatch)
+	}
+	who, err := d.client.GetTaskTokenWhoami(ctx, task.AuthToken)
+	if err != nil {
+		return fmt.Errorf("task token whoami failed: %w", err)
+	}
+	if who.TaskID != task.ID {
+		return fmt.Errorf("%w: token is bound to task %s but claimed task is %s", errTaskTokenBindingMismatch, who.TaskID, task.ID)
+	}
+	return nil
+}
+
+// reportTaskTokenBindingFailure ends the claimed task without launching an
+// agent. A binding mismatch is permanent and non-retryable; a whoami transport
+// failure is retried like any other runtime outage.
+func (d *Daemon) reportTaskTokenBindingFailure(ctx context.Context, task Task, taskLog *slog.Logger, message string, permanent bool) {
+	reason := taskfailure.ReasonRuntimeOffline
+	if permanent {
+		reason = taskfailure.ReasonInvalidTaskIdentity
+	}
+	if err := d.reportTerminalTask(ctx, terminalTaskReport{
+		kind:          terminalTaskReportFail,
+		taskID:        task.ID,
+		dispatchedAt:  task.DispatchedAt,
+		errorMessage:  message,
+		failureReason: reason.String(),
+	}); err != nil {
+		taskLog.Error("fail task callback failed", "task", task.ID, "error", err)
+	}
+}
+
 func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.mu.Lock()
 	rt, tracked := d.runtimeIndex[task.RuntimeID]
@@ -5684,6 +5818,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
+			dispatchedAt:  task.DispatchedAt,
 			errorMessage:  "runtime went offline before the run started",
 			failureReason: taskfailure.ReasonRuntimeOffline.String(),
 		}); err != nil {
@@ -5700,6 +5835,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// a millisecond timestamp that only advances every ~65s, so concurrent
 	// tasks routinely share one (#7326).
 	taskLog := d.logger.With("task", task.ID)
+	taskLog = taskLog.With(
+		"task_id", task.ID,
+		"token_fingerprint", taskTokenFingerprint(task.AuthToken),
+		"dispatched_at", task.DispatchedAt,
+	)
 	phaseRecorder := newTaskPhaseRecorder(taskLog.With("task_id", task.ID, "runtime_id", task.RuntimeID), time.Now)
 	ctx = withTaskPhaseRecorder(ctx, phaseRecorder)
 	phaseRecorder.Mark(taskPhaseClaimed)
@@ -5852,6 +5992,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:             terminalTaskReportFail,
 			taskID:           task.ID,
+			dispatchedAt:     task.DispatchedAt,
 			errorMessage:     err.Error(),
 			branchName:       result.BranchName,
 			workDir:          result.WorkDir,
@@ -5889,7 +6030,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	d.reportTaskResultForTask(ctx, task, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -6086,6 +6227,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
+			dispatchedAt:  task.DispatchedAt,
 			errorMessage:  err.Error(),
 			failureReason: "local_directory_error",
 		}); failErr != nil {
@@ -6105,6 +6247,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
+			dispatchedAt:  task.DispatchedAt,
 			errorMessage:  err.Error(),
 			failureReason: "local_directory_error",
 		}); failErr != nil {
@@ -6117,6 +6260,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
+			dispatchedAt:  task.DispatchedAt,
 			errorMessage:  err.Error(),
 			failureReason: "local_directory_error",
 		}); failErr != nil {
@@ -6247,6 +6391,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
+			dispatchedAt:  task.DispatchedAt,
 			errorMessage:  fmt.Sprintf("local_directory wait cancelled: %s", err.Error()),
 			failureReason: failureReason,
 		}); failErr != nil {
@@ -6269,12 +6414,22 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
 func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+	d.reportTaskResultForTask(ctx, Task{ID: taskID}, result, taskLog)
+}
+
+// reportTaskResultForTask carries the claim generation so the terminal callback
+// revokes only this delivery's token generation.
+func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result TaskResult, taskLog *slog.Logger) {
 	switch result.Status {
 	case "completed":
-		taskLog.Info("task completed", "status", result.Status)
+		taskLog.Info("task completed", "status", result.Status,
+			"task_id", task.ID,
+			"token_fingerprint", taskTokenFingerprint(task.AuthToken),
+			"dispatched_at", task.DispatchedAt)
 		err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:                  terminalTaskReportComplete,
-			taskID:                taskID,
+			taskID:                task.ID,
+			dispatchedAt:          task.DispatchedAt,
 			output:                result.Comment,
 			branchName:            result.BranchName,
 			sessionID:             result.SessionID,
@@ -6313,7 +6468,8 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:           terminalTaskReportFail,
-			taskID:         taskID,
+			taskID:         task.ID,
+			dispatchedAt:   task.DispatchedAt,
 			errorMessage:   result.Comment,
 			sessionID:      result.SessionID,
 			workDir:        result.WorkDir,
@@ -6425,9 +6581,9 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	}
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.completeTaskWithRetryScheduleAt(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.dispatchedAt, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.failTaskWithRetryScheduleAt(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.dispatchedAt, schedule)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}

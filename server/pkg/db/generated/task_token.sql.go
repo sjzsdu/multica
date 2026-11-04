@@ -12,19 +12,20 @@ import (
 )
 
 const createTaskToken = `-- name: CreateTaskToken :one
-INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at, id)
-VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
-RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at, dispatched_at, id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, gen_random_uuid()))
+RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at
 `
 
 type CreateTaskTokenParams struct {
-	TokenHash   string             `json:"token_hash"`
-	TaskID      pgtype.UUID        `json:"task_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	ID          pgtype.UUID        `json:"id"`
+	TokenHash    string             `json:"token_hash"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	DispatchedAt pgtype.Timestamptz `json:"dispatched_at"`
+	ID           pgtype.UUID        `json:"id"`
 }
 
 func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams) (TaskToken, error) {
@@ -35,6 +36,7 @@ func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams
 		arg.WorkspaceID,
 		arg.UserID,
 		arg.ExpiresAt,
+		arg.DispatchedAt,
 		arg.ID,
 	)
 	var i TaskToken
@@ -47,12 +49,15 @@ func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.DispatchedAt,
+		&i.RevokedAt,
 	)
 	return i, err
 }
 
 const deleteExpiredTaskTokens = `-- name: DeleteExpiredTaskTokens :exec
-DELETE FROM task_token WHERE expires_at <= now()
+DELETE FROM task_token
+WHERE expires_at <= now() OR revoked_at < now() - interval '7 days'
 `
 
 func (q *Queries) DeleteExpiredTaskTokens(ctx context.Context) error {
@@ -60,18 +65,94 @@ func (q *Queries) DeleteExpiredTaskTokens(ctx context.Context) error {
 	return err
 }
 
-const deleteTaskTokensByTask = `-- name: DeleteTaskTokensByTask :exec
-DELETE FROM task_token WHERE task_id = $1
+const deleteTaskTokensByTask = `-- name: DeleteTaskTokensByTask :many
+UPDATE task_token SET revoked_at = now()
+WHERE task_id = $1 AND revoked_at IS NULL
+RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at
 `
 
-func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteTaskTokensByTask, taskID)
-	return err
+// Revocation is a soft delete: rows stay for diagnostics and are pruned by
+// DeleteExpiredTaskTokens. This task-wide form is reserved for cancellation,
+// where the agent process must never call back again.
+func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskToken, error) {
+	rows, err := q.db.Query(ctx, deleteTaskTokensByTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskToken{}
+	for rows.Next() {
+		var i TaskToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.TokenHash,
+			&i.TaskID,
+			&i.AgentID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.DispatchedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const deleteTaskTokensByTaskGeneration = `-- name: DeleteTaskTokensByTaskGeneration :many
+UPDATE task_token SET revoked_at = now()
+WHERE task_id = $1 AND dispatched_at <= $2 AND revoked_at IS NULL
+RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at
+`
+
+type DeleteTaskTokensByTaskGenerationParams struct {
+	TaskID       pgtype.UUID        `json:"task_id"`
+	DispatchedAt pgtype.Timestamptz `json:"dispatched_at"`
+}
+
+// Revoke only tokens minted at or before the given dispatch generation.
+// A stale reclaim mints a NEWER token for the same task; a completion from
+// the older delivery must not revoke it.
+func (q *Queries) DeleteTaskTokensByTaskGeneration(ctx context.Context, arg DeleteTaskTokensByTaskGenerationParams) ([]TaskToken, error) {
+	rows, err := q.db.Query(ctx, deleteTaskTokensByTaskGeneration, arg.TaskID, arg.DispatchedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskToken{}
+	for rows.Next() {
+		var i TaskToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.TokenHash,
+			&i.TaskID,
+			&i.AgentID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.DispatchedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at FROM task_token
-WHERE token_hash = $1 AND expires_at > now()
+SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at FROM task_token
+WHERE token_hash = $1 AND expires_at > now() AND revoked_at IS NULL
 `
 
 func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (TaskToken, error) {
@@ -86,6 +167,34 @@ func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (Tas
 		&i.UserID,
 		&i.ExpiresAt,
 		&i.CreatedAt,
+		&i.DispatchedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const getTaskTokenByHashForRevocationCheck = `-- name: GetTaskTokenByHashForRevocationCheck :one
+SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at FROM task_token
+WHERE token_hash = $1 AND expires_at > now()
+`
+
+// Used only after GetTaskTokenByHash misses, to tell a revoked token from an
+// unknown or expired one. The expiry filter keeps expired tokens in the
+// "invalid token" bucket rather than reporting them as revoked.
+func (q *Queries) GetTaskTokenByHashForRevocationCheck(ctx context.Context, tokenHash string) (TaskToken, error) {
+	row := q.db.QueryRow(ctx, getTaskTokenByHashForRevocationCheck, tokenHash)
+	var i TaskToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.TaskID,
+		&i.AgentID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.DispatchedAt,
+		&i.RevokedAt,
 	)
 	return i, err
 }

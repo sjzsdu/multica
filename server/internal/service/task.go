@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -890,16 +891,36 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 	}
-	// Revoke any mat_ task tokens minted for this task. Cancellation is
-	// a terminal transition, so the running agent process no longer
-	// needs to call back; eagerly deleting the token closes the
-	// window where a compromised process could keep authenticating
-	// against the API until the 24h expiry. Failure is non-fatal — the
-	// expiry / FK cascade are the durable guards. MUL-2600.
-	if err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+	// Revoke every mat_ token minted for this task, across all dispatch
+	// generations: cancellation is terminal, so no agent process — current or
+	// stale — should keep calling back. The revoke is a soft delete; failures
+	// are non-fatal and the 24h expiry remains the durable guard. MUL-2600.
+	tokens, err := s.Queries.DeleteTaskTokensByTask(ctx, task.ID)
+	if err != nil {
 		slog.Warn("cancel task: failed to revoke task tokens",
 			"task_id", util.UUIDToString(task.ID), "error", err)
+		return
 	}
+	for _, token := range tokens {
+		slog.Info("task token revoked",
+			"event", "task_token_revoked",
+			"revoked_by", "cancel",
+			"task_id", util.UUIDToString(token.TaskID),
+			"agent_id", util.UUIDToString(token.AgentID),
+			"workspace_id", util.UUIDToString(token.WorkspaceID),
+			"dispatched_at", tokenTimestampString(token.DispatchedAt),
+			"revoked_at", tokenTimestampString(token.RevokedAt),
+			"token_id", util.UUIDToString(token.ID),
+			"token_fingerprint", auth.HashFingerprint(token.TokenHash),
+		)
+	}
+}
+
+func tokenTimestampString(ts pgtype.Timestamptz) string {
+	if !ts.Valid {
+		return ""
+	}
+	return ts.Time.UTC().Format(time.RFC3339Nano)
 }
 
 // costUSDTicks is the provider's own price for this usage in 1e-10 USD, or 0

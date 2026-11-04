@@ -2276,14 +2276,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		// same transaction; a rejected task is settled via FailTask and skipped
 		// while valid tasks in the same batch continue.
 		commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+		tokenID := dbid.NewV7()
 		receipt, deliveryFailure, ferr := h.finalizeClaimDelivery(r.Context(), &task, rt, uuidToString(task.RuntimeID), rtWorkspaceID, &resp, db.CreateTaskTokenParams{
-			ID:          dbid.NewV7(),
-			TokenHash:   auth.HashToken(tokenStr),
-			TaskID:      task.ID,
-			AgentID:     task.AgentID,
-			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      rt.OwnerID,
-			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+			ID:           tokenID,
+			TokenHash:    auth.HashToken(tokenStr),
+			TaskID:       task.ID,
+			AgentID:      task.AgentID,
+			WorkspaceID:  parseUUID(resp.WorkspaceID),
+			UserID:       rt.OwnerID,
+			ExpiresAt:    pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+			DispatchedAt: task.DispatchedAt,
 		}, deliveredCommentIDs, commentBackedTask, issueSnapshot, daemonTokens...)
 		if ferr != nil {
 			slog.Error("batch claim: finalize task claim failed; requeueing claim",
@@ -2298,6 +2300,15 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		slog.Info("task token minted",
+			"event", "task_token_minted",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"workspace_id", resp.WorkspaceID,
+			"dispatched_at", timestamptzString(task.DispatchedAt),
+			"token_id", uuidToString(tokenID),
+			"token_fingerprint", auth.TokenFingerprint(tokenStr),
+		)
 		resp.AuthToken = tokenStr
 		resp.RemoteMCPDaemonToken = remoteMCPToken
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
@@ -4448,14 +4459,16 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mint Remote MCP daemon token")
 		return
 	}
+	tokenID := dbid.NewV7()
 	receipt, deliveryFailure, ferr := h.finalizeClaimDelivery(r.Context(), task, runtime, runtimeID, runtimeWorkspaceID, &resp, db.CreateTaskTokenParams{
-		ID:          dbid.NewV7(),
-		TokenHash:   auth.HashToken(tokenStr),
-		TaskID:      task.ID,
-		AgentID:     task.AgentID,
-		WorkspaceID: parseUUID(resp.WorkspaceID),
-		UserID:      runtime.OwnerID,
-		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		ID:           tokenID,
+		TokenHash:    auth.HashToken(tokenStr),
+		TaskID:       task.ID,
+		AgentID:      task.AgentID,
+		WorkspaceID:  parseUUID(resp.WorkspaceID),
+		UserID:       runtime.OwnerID,
+		ExpiresAt:    pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		DispatchedAt: task.DispatchedAt,
 	}, deliveredCommentIDs, commentBackedTask, issueSnapshot, daemonTokens...)
 	if ferr != nil {
 		outcome = "error_claim_finalize"
@@ -4483,6 +4496,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 		return
 	}
+	slog.Info("task token minted",
+		"event", "task_token_minted",
+		"task_id", uuidToString(task.ID),
+		"agent_id", uuidToString(task.AgentID),
+		"workspace_id", resp.WorkspaceID,
+		"dispatched_at", timestamptzString(task.DispatchedAt),
+		"token_id", uuidToString(tokenID),
+		"token_fingerprint", auth.TokenFingerprint(tokenStr),
+	)
 	resp.AuthToken = tokenStr
 	resp.RemoteMCPDaemonToken = remoteMCPToken
 	task.DeliveredCommentIds = receipt
@@ -4892,6 +4914,12 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// DispatchedAt is the claim generation this callback belongs to, copied
+	// from the claim response (RFC3339Nano). Tokens minted for a later stale
+	// reclaim of the same task carry a newer generation and must survive an
+	// older delivery's completion. Older daemons omit it; the handler then
+	// falls back to the legacy task-wide revocation and logs a warning.
+	DispatchedAt string `json:"dispatched_at,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -4909,6 +4937,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.DispatchedAt = util.SanitizeTextForPostgres(req.DispatchedAt)
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {
@@ -4919,6 +4948,100 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.DispatchedAt = util.SanitizeTextForPostgres(req.DispatchedAt)
+}
+
+// parseCallbackDispatchedAt parses the optional claim generation on a terminal
+// callback. An empty value means an older daemon and is valid; anything else
+// must be RFC3339Nano. On failure it writes a 400 and reports ok=false.
+func parseCallbackDispatchedAt(w http.ResponseWriter, raw string) (*time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid dispatched_at")
+		return nil, false
+	}
+	parsed = parsed.UTC()
+	return &parsed, true
+}
+
+func timestamptzString(ts pgtype.Timestamptz) string {
+	if !ts.Valid {
+		return ""
+	}
+	return ts.Time.UTC().Format(time.RFC3339Nano)
+}
+
+// revokeTaskTokensOnTerminal revokes task tokens when a task settles. With a
+// dispatched_at generation it revokes only tokens minted at or before that
+// generation; a stale reclaim's newer token survives. Without one it preserves
+// the legacy task-wide behavior (and only on a real transition) while logging
+// legacy_broad_revoke so the remaining old daemons are visible in logs.
+func (h *Handler) revokeTaskTokensOnTerminal(ctx context.Context, taskID pgtype.UUID, revokedBy string, dispatchedAt *time.Time, transitioned bool) {
+	if dispatchedAt == nil {
+		if !transitioned {
+			return
+		}
+		slog.Warn("task token revoke: legacy_broad_revoke",
+			"event", "legacy_broad_revoke",
+			"revoked_by", revokedBy,
+			"task_id", uuidToString(taskID),
+		)
+		tokens, err := h.Queries.DeleteTaskTokensByTask(ctx, taskID)
+		if err != nil {
+			slog.Warn("task token revoke: failed", "revoked_by", revokedBy,
+				"task_id", uuidToString(taskID), "error", err)
+			return
+		}
+		logTaskTokensRevoked(revokedBy, tokens)
+		return
+	}
+
+	tokens, err := h.Queries.DeleteTaskTokensByTaskGeneration(ctx, db.DeleteTaskTokensByTaskGenerationParams{
+		TaskID:       taskID,
+		DispatchedAt: pgtype.Timestamptz{Time: *dispatchedAt, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("task token revoke: failed", "revoked_by", revokedBy,
+			"task_id", uuidToString(taskID), "dispatched_at", dispatchedAt.Format(time.RFC3339Nano),
+			"error", err)
+		return
+	}
+	logTaskTokensRevoked(revokedBy, tokens)
+}
+
+func logTaskTokensRevoked(revokedBy string, tokens []db.TaskToken) {
+	for _, token := range tokens {
+		slog.Info("task token revoked",
+			"event", "task_token_revoked",
+			"revoked_by", revokedBy,
+			"task_id", uuidToString(token.TaskID),
+			"agent_id", uuidToString(token.AgentID),
+			"workspace_id", uuidToString(token.WorkspaceID),
+			"dispatched_at", timestamptzString(token.DispatchedAt),
+			"revoked_at", timestamptzString(token.RevokedAt),
+			"token_id", uuidToString(token.ID),
+			"token_fingerprint", auth.HashFingerprint(token.TokenHash),
+		)
+	}
+}
+
+// TaskTokenWhoami returns the identity a mat_ token is bound to. It exists so
+// the daemon can verify, before spawning an agent, that the token it is about
+// to inject belongs to the task it just claimed. No business data is exposed.
+func (h *Handler) TaskTokenWhoami(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Actor-Source") != "task_token" {
+		writeError(w, http.StatusForbidden, "task token required")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{
+		"task_id":      r.Header.Get("X-Task-ID"),
+		"agent_id":     r.Header.Get("X-Agent-ID"),
+		"workspace_id": r.Header.Get("X-Workspace-ID"),
+	})
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -4944,6 +5067,10 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// re-route below feeds req.Output into the failure classifier, and that
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
+	dispatchedAt, ok := parseCallbackDispatchedAt(w, req.DispatchedAt)
+	if !ok {
+		return
+	}
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -4973,6 +5100,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
+			DispatchedAt:          req.DispatchedAt,
 		})
 		return
 	}
@@ -4993,6 +5121,15 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to complete task")
 		return
 	}
+	// Revoke only the mat_ tokens minted for this dispatch generation. A stale
+	// reclaim of the same task mints a NEWER token; that delivery is already
+	// authorized to run and must not be revoked by this older callback.
+	// Generation-scoped revocation runs even when the transition was a replay,
+	// so the caller's own generation cannot keep authenticating after it has
+	// reported a terminal outcome. Only an old daemon omitting dispatched_at
+	// falls back to the legacy task-wide revoke, and only on a real transition.
+	h.revokeTaskTokensOnTerminal(r.Context(), task.ID, "complete", dispatchedAt, transitioned)
+
 	if !transitioned {
 		writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 		return
@@ -5010,16 +5147,6 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// Wake the owning runtime now so queued work that was blocked by this
 	// task's agent capacity or serialization key is re-claimed immediately.
 	h.TaskService.NotifyTaskFinished(*task)
-
-	// Best-effort revoke of any agent task token minted at claim time.
-	// The token would naturally expire at the 24h watermark and is also
-	// cascaded on agent_task deletion, but eagerly deleting it on
-	// completion shrinks the window where a compromised agent process
-	// can keep making API calls after its task finishes. Failure here is
-	// non-fatal; the expiry / cascade are the durable guards.
-	if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
-		slog.Warn("complete task: failed to revoke task tokens", "task_id", uuidToString(task.ID), "error", err)
-	}
 
 	slog.Info("task completed", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
@@ -5659,6 +5786,9 @@ type TaskFailRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// DispatchedAt is the claim generation this failure belongs to (RFC3339Nano).
+	// See TaskCompleteRequest.DispatchedAt.
+	DispatchedAt string `json:"dispatched_at,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -5689,6 +5819,10 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 // transaction, token revocation and runtime wake-up as one the daemon reported
 // as failed itself.
 func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, workspaceID string, req TaskFailRequest) {
+	dispatchedAt, ok := parseCallbackDispatchedAt(w, req.DispatchedAt)
+	if !ok {
+		return
+	}
 	// MUL-5305: SessionRolloutMissing is applied inside FailTask's terminal
 	// transaction — forcing session_id NULL (overriding the COALESCE that would
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
@@ -5707,18 +5841,16 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		writeError(w, http.StatusInternalServerError, "failed to fail task")
 		return
 	}
+	// Revoke this dispatch generation's tokens; see CompleteTask. This runs
+	// before the transitioned check so a replayed callback from an older
+	// delivery still cannot leave its own token alive, while a newer stale
+	// reclaim's token is untouched.
+	h.revokeTaskTokensOnTerminal(r.Context(), task.ID, "fail", dispatchedAt, transitioned)
 	if !transitioned {
 		writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 		return
 	}
 	h.TaskService.NotifyTaskFinished(*task)
-
-	// Best-effort revoke of the mat_ task token minted at claim. Same
-	// rationale as CompleteTask — eager deletion shrinks the post-
-	// terminal window. The 24h expiry / cascade are the durable guards.
-	if err := h.Queries.DeleteTaskTokensByTask(r.Context(), task.ID); err != nil {
-		slog.Warn("fail task: failed to revoke task tokens", "task_id", uuidToString(task.ID), "error", err)
-	}
 
 	slog.Info("task failed", "task_id", taskID, "agent_id", uuidToString(task.AgentID), "task_error", req.Error, "failure_reason", req.FailureReason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
