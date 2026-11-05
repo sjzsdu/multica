@@ -13,7 +13,11 @@ import (
 
 const createTaskToken = `-- name: CreateTaskToken :one
 INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at, dispatched_at, id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, gen_random_uuid()))
+VALUES (
+  $1, $2, $3, $4, $5, $6,
+  COALESCE($7::timestamptz, now()),
+  COALESCE($8::uuid, gen_random_uuid())
+)
 RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, dispatched_at, revoked_at
 `
 
