@@ -72,14 +72,28 @@ func init() {
 }
 
 func resolveToken(cmd *cobra.Command) string {
-	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
-		return v
+	envToken := strings.TrimSpace(os.Getenv("MULTICA_TOKEN"))
+	daemonCtx := inDaemonManagedExecutionContext()
+	// Inside a daemon-managed task the workdir credential file wins: a runtime
+	// that reuses a long-lived process can hand the CLI the environment of an
+	// earlier task, whose token the server has already revoked. The file is
+	// written for this run, so it is the one value that is always current.
+	if daemonCtx {
+		if cred, path, ok := resolveDaemonIdentity(); ok {
+			if envToken != "" && envToken != cred.Token {
+				fmt.Fprintf(os.Stderr, "multica: warning: using the task credential at %s; the inherited MULTICA_TOKEN belongs to an earlier run\n", path)
+			}
+			return cred.Token
+		}
+	}
+	if envToken != "" {
+		return envToken
 	}
 	// Inside a daemon-managed task, never fall back to the user-global config
 	// token: that silent fallback is how agent writes land as the wrong actor.
 	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
 	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
-	if inDaemonManagedExecutionContext() {
+	if daemonCtx {
 		return ""
 	}
 	profile := resolveProfile(cmd)

@@ -280,7 +280,9 @@ describe("SquadDetailPage", () => {
     const editor = screen.getByRole("textbox", { name: "Instructions editor" });
     await user.clear(editor);
     await user.type(editor, "Ship small.");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Scoped: the workflow section (which also owns a persistent Save bar)
+    // renders alongside the instructions editor.
+    await user.click(within(section("Instructions")).getByRole("button", { name: "Save" }));
     expect(mocks.api.updateSquad).toHaveBeenCalledWith("sq-1", { instructions: "Ship small." });
   });
 

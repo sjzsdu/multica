@@ -766,7 +766,14 @@
     "prefix_external_warning": "Las claves antiguas como {{oldExample}} en títulos de PR, nombres de rama, documentación y chat no se actualizan, así que esos enlaces dejan de funcionar.",
     "prefix_new_label": "Nuevo prefijo",
     "prefix_rule": "Solo letras y números, hasta 10 caracteres.",
-    "slug_hint": "Forma parte de cada URL del espacio de trabajo. No se puede cambiar."
+    "slug_hint": "Forma parte de cada URL del espacio de trabajo. No se puede cambiar.",
+    "storage_section": "Almacenamiento",
+    "storage_migration_label": "Migración de archivos locales",
+    "storage_migration_pending": "{{attachments}} {{attachments_noun}} y {{avatars}} {{avatars_noun}} siguen en el disco local de este servidor.",
+    "storage_migration_running": "Moviendo {{files_noun}} al almacenamiento de objetos… {{migrated}} movidos, {{failed}} fallidos.",
+    "storage_migration_finished": "Se movieron {{migrated}} {{files_noun}} al almacenamiento de objetos, {{failed}} fallidos.",
+    "storage_migration_start": "Migrar archivos",
+    "storage_migration_start_failed": "No se ha podido iniciar la migración de almacenamiento."
   },
   "delete_workspace_dialog": {
     "title": "Eliminar espacio de trabajo",

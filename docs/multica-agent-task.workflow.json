@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Multica Agent Task 工作流",
+    "output": "multica-agent-task.workflow.html",
+    "quality_profile": "showcase",
+    "viewBox": [1200, 714],
+    "views": [
+      { "id": "main-path", "label": "主执行路径", "focus": ["issue-trigger", "task-create", "event-bus", "daemon-claim", "runtime-exec", "report-result", "cache-update"], "note": "从 Issue 触发任务，经过 Daemon 执行，最终同步回客户端缓存。" },
+      { "id": "failure-retry", "label": "失败与重试", "focus": ["runtime-exec", "task-failure", "task-create"], "note": "失败原因会落库，并可回到任务创建路径进行重试。" },
+      { "id": "realtime-sync", "label": "状态同步", "focus": ["report-result", "ws-broadcast", "cache-update"], "note": "服务端提交结果后，通过 WebSocket 驱动 Query cache 更新。" }
+    ]
+  },
+  "lanes": [
+    { "id": "client", "label": "客户端" },
+    { "id": "api", "label": "Go API 服务" },
+    { "id": "daemon", "label": "Agent Daemon / Runtime" },
+    { "id": "realtime", "label": "事件与实时同步" },
+    { "id": "exceptions", "label": "失败与恢复", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "trigger", "label": "触发与入队", "fromCol": 0, "toCol": 1, "variant": "emphasis" },
+    { "id": "execution", "label": "领取与执行", "fromCol": 2, "toCol": 4, "variant": "dashed" },
+    { "id": "sync", "label": "提交与同步", "fromCol": 5, "toCol": 5 }
+  ],
+  "groups": [
+    { "id": "agent-execution", "label": "异步 Agent 执行", "lane": "daemon", "fromCol": 3, "toCol": 4, "variant": "emphasis" },
+    { "id": "recovery-loop", "label": "失败恢复", "lane": "exceptions", "fromCol": 3, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["issue-trigger", "task-create", "event-bus", "daemon-claim", "runtime-exec", "report-result", "ws-broadcast", "cache-update"],
+  "nodes": [
+    { "id": "issue-trigger", "lane": "client", "col": 0, "type": "frontend", "label": "Issue 触发", "sublabel": "comment / manual", "tag": "packages/views" },
+    { "id": "task-create", "lane": "api", "col": 1, "type": "backend", "label": "创建任务", "sublabel": "agent_task_queue", "tag": "handler + service" },
+    { "id": "event-bus", "lane": "realtime", "col": 2, "type": "messagebus", "label": "任务事件", "sublabel": "publish / wakeup", "tag": "server/internal/events" },
+    { "id": "daemon-claim", "lane": "api", "col": 3, "type": "external", "label": "Daemon 领取", "sublabel": "claim task", "tag": "server/internal/daemon" },
+    { "id": "runtime-exec", "lane": "daemon", "col": 4, "type": "backend", "label": "Runtime 执行", "sublabel": "agent / tools", "tag": "status:running" },
+    { "id": "report-result", "lane": "api", "col": 5, "type": "backend", "label": "回报并提交", "sublabel": "persist + result", "tag": "PostgreSQL + API" },
+    { "id": "ws-broadcast", "lane": "realtime", "col": 5, "type": "messagebus", "label": "广播事件", "sublabel": "WebSocket / Redis", "tag": "realtime" },
+    { "id": "cache-update", "lane": "client", "col": 5, "type": "frontend", "label": "更新界面", "sublabel": "Query cache", "tag": "packages/core" },
+    { "id": "task-failure", "lane": "exceptions", "col": 4, "type": "security", "label": "失败 / 超时", "sublabel": "failure reason", "tag": "queued_expired 等" }
+  ],
+  "edges": [
+    { "id": "trigger-create", "from": "issue-trigger", "to": "task-create", "variant": "emphasis", "role": "main" },
+    { "id": "create-publish", "from": "task-create", "to": "event-bus", "variant": "emphasis", "role": "main", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+    { "id": "publish-claim", "from": "event-bus", "to": "daemon-claim", "variant": "emphasis", "role": "async" },
+    { "id": "claim-runtime", "from": "daemon-claim", "to": "runtime-exec", "variant": "emphasis", "role": "main" },
+    { "id": "runtime-result", "from": "runtime-exec", "to": "report-result", "variant": "default", "role": "return" },
+    { "id": "result-ws", "from": "report-result", "to": "ws-broadcast", "variant": "dashed", "role": "async" },
+    { "id": "ws-cache", "from": "ws-broadcast", "to": "cache-update", "variant": "emphasis", "role": "main", "route": "outside-right" },
+    { "id": "runtime-failure", "from": "runtime-exec", "to": "task-failure", "label": "error", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "任务主路径", "items": ["Issue 触发后先落库，再由 Daemon 领取", "Runtime 通过 /api/daemon 回报进度与结果", "最终状态经 WebSocket 返回客户端"] },
+    { "dot": "emerald", "title": "状态一致性", "items": ["PostgreSQL 是任务与 Issue 的持久化来源", "React Query 持有客户端服务端状态", "WebSocket 事件负责 patch 或 invalidate cache"] },
+    { "dot": "rose", "title": "失败恢复", "items": ["失败原因写入任务记录", "可恢复任务进入 reclaim / retry", "queued_expired 等终态不会伪装成成功"] }
+  ]
+}

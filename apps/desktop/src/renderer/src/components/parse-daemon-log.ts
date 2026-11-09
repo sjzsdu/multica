@@ -3,6 +3,8 @@
 // has a stable shape:
 //
 //   HH:MM:SS.mmm  LEVEL  message text  key=value key2="quoted value"
+//   or, on daemon builds that stamp the date, RFC3339:
+//   2006-01-02T15:04:05.000Z07:00  LEVEL  message text  key=value ...
 //
 // We split it into structured pieces so the UI can render timestamp,
 // level, message and structured fields in separate columns and let users
@@ -15,7 +17,8 @@ export type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 export interface ParsedLogLine {
   /** Monotonic id assigned at receive time; stable across re-renders. */
   id: number;
-  /** "HH:MM:SS.mmm" or null when the line didn't match the standard shape. */
+  /** "HH:MM:SS.mmm" or RFC3339 when the daemon stamps the date; null when
+   *  the line didn't match the standard shape. */
   timestamp: string | null;
   level: LogLevel | null;
   /** Human-readable message body, with structured fields stripped off. */
@@ -33,8 +36,10 @@ export interface ParsedLogLine {
 // 4-letter LogLevel. The optional `[+-]\d+` suffix is captured into the
 // regex and discarded — surfacing `INF+1` to the UI doesn't help users
 // and complicates the level filter chips.
+// Older daemon builds emit a bare clock; newer ones prefix the date so lines
+// stay distinguishable across rotated multi-day files. Both shapes are valid.
 const HEADER_RE =
-  /^(\d{2}:\d{2}:\d{2}\.\d{3})\s+(DEBUG|DBG|INFO|INF|WARN|WRN|ERROR|ERR)(?:[+-]\d+)?\s+(.+)$/;
+  /^((?:\d{4}-\d{2}-\d{2}T)?\d{2}:\d{2}:\d{2}\.\d{3}(?:Z|[+-]\d{2}:\d{2})?)\s+(DEBUG|DBG|INFO|INF|WARN|WRN|ERROR|ERR)(?:[+-]\d+)?\s+(.+)$/;
 
 const LEVEL_NORMALIZE: Record<string, LogLevel> = {
   DEBUG: "DEBUG",

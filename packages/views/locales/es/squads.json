@@ -97,7 +97,8 @@
     "leader_updated": "Líder actualizado",
     "leader_update_failed": "No se ha podido actualizar el líder",
     "archive_failed": "No se ha podido archivar el squad",
-    "instructions_saved": "Instrucciones guardadas"
+    "instructions_saved": "Instrucciones guardadas",
+    "workflow_settings_saved": "Configuración del flujo guardada"
   },
   "profile_card": {
     "unavailable": "Squad no disponible",
@@ -133,7 +134,8 @@
     "recent_work": "Trabajo reciente",
     "recent_work_empty": "Aún no se han asignado tareas a este squad.",
     "member_menu": "Acciones de {{name}}",
-    "working_on": "Trabajando en"
+    "working_on": "Trabajando en",
+    "workflow": "Flujo de trabajo"
   },
   "intro": {
     "title": "Agrupa agentes en un squad y trabajarán como un equipo",
@@ -164,5 +166,29 @@
       "role_testing": "Pruebas",
       "role_product": "Producto"
     }
+  },
+  "workflow_tab": {
+    "title": "Política del flujo de trabajo",
+    "description": "Controla cómo este squad avanza el trabajo secundario y cierra la tarea principal.",
+    "mode_label": "Modo",
+    "mode_manual": "Manual",
+    "mode_staged": "Por etapas",
+    "mode_delivery": "Entrega",
+    "max_active_children_label": "Máximo de tareas secundarias activas",
+    "unlimited_hint": "0 significa ilimitado.",
+    "auto_promote_label": "Promover etapas automáticamente",
+    "auto_promote_description": "Inicia la siguiente etapa cuando la actual supera sus puertas.",
+    "auto_finalize_label": "Mover la tarea principal a En revisión automáticamente",
+    "auto_finalize_description": "Mueve la tarea principal a En revisión cuando todas las etapas y puertas se superan; nunca la marca como Hecha.",
+    "require_tests_label": "Requerir pruebas",
+    "require_tests_description": "Se requiere una señal de prueba/verificación superada antes de promover.",
+    "require_review_label": "Requerir revisión",
+    "require_review_description": "Se requiere una señal de revisión o una aprobación de revisión humana.",
+    "require_merge_label": "Requerir fusión",
+    "require_merge_description": "Se requiere un cambio fusionado o la política de fusión seleccionada.",
+    "human_approval_label": "Requerir aprobación humana",
+    "human_approval_description": "Pausa el flujo hasta que un miembro apruebe la etapa.",
+    "changes_hint": "Los cambios se aplican a las nuevas transiciones y reintentos del flujo.",
+    "save_button": "Guardar"
   }
 }

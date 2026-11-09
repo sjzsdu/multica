@@ -30,6 +30,45 @@ type taskContextMarkerFile struct {
 	ChatSessionID string `json:"chat_session_id,omitempty"`
 }
 
+// TaskCredentialsRelPath is the per-task credential file the daemon writes
+// under the task workdir. The CLI reads it as the authoritative token when the
+// inherited environment may be stale.
+//
+// Some runtimes keep a process alive across tasks (jcode backs `jcode acp` with
+// a shared server that outlives the adapter and is reused while it is warm).
+// That server captures its environment when the first run starts it, so a
+// later task that resumes the same session still sees the FIRST run's
+// MULTICA_TOKEN — which the server revokes when that task completes. Every API
+// call the new task makes then fails with 401 despite the daemon having
+// injected the right token. The workdir is the one identity a resumed session
+// still shares with the current run, so the token travels there.
+const TaskCredentialsRelPath = ".multica/daemon_task_credentials.json"
+
+// TaskCredentialsManagedBy is the discriminator the CLI checks before treating
+// TaskCredentialsRelPath as daemon-owned.
+const TaskCredentialsManagedBy = "multica-daemon-task-credentials"
+
+// TaskCredentials is the daemon-side input for TaskCredentialsRelPath. Besides
+// the token it carries the task identity fields agents also read from the
+// environment (MULTICA_TASK_ID / MULTICA_WORKSPACE_ID / ...), which a runtime
+// that reuses a long-lived process freezes just like the token.
+type TaskCredentials struct {
+	Token       string
+	TaskID      string
+	WorkspaceID string
+	AgentID     string
+	AgentName   string
+}
+
+type taskCredentialsFile struct {
+	ManagedBy   string `json:"managed_by"`
+	Token       string `json:"token"`
+	TaskID      string `json:"task_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	AgentName   string `json:"agent_name,omitempty"`
+}
+
 // EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
 // {workspacesRoot}/.multica/daemon_task_context.json.
 //
@@ -114,6 +153,71 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 	if err := os.Rename(tmpPath, path); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename workspaces root marker: %w", err)
+	}
+	return nil
+}
+
+// WriteTaskCredentials writes the current task's token to the per-task
+// credential file under workDir and returns its path. The write is atomic
+// (temp file + rename) and the file is 0600: unlike the context marker, this
+// one carries a secret.
+func WriteTaskCredentials(workDir string, cred TaskCredentials) (string, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return "", errors.New("execenv: workdir is required")
+	}
+	if strings.TrimSpace(cred.Token) == "" {
+		return "", errors.New("execenv: task token is required")
+	}
+	path := filepath.Join(workDir, TaskCredentialsRelPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", fmt.Errorf("create task credentials dir: %w", err)
+	}
+	payload := taskCredentialsFile{
+		ManagedBy:   TaskCredentialsManagedBy,
+		Token:       strings.TrimSpace(cred.Token),
+		TaskID:      cred.TaskID,
+		WorkspaceID: cred.WorkspaceID,
+		AgentID:     cred.AgentID,
+		AgentName:   cred.AgentName,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal task credentials: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".daemon_task_credentials-*.json.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temp task credentials: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("write temp task credentials: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("close temp task credentials: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("chmod temp task credentials: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("rename task credentials: %w", err)
+	}
+	return path, nil
+}
+
+// RemoveTaskCredentials deletes the per-task credential file. It is called
+// when the run ends so the token does not outlive the task on disk; the
+// server revokes it at completion either way. Missing file is not an error.
+func RemoveTaskCredentials(workDir string) error {
+	if strings.TrimSpace(workDir) == "" {
+		return nil
+	}
+	if err := os.Remove(filepath.Join(workDir, TaskCredentialsRelPath)); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	return nil
 }
@@ -246,6 +350,43 @@ type projectResourceFile struct {
 	ProjectTitle       string                  `json:"project_title,omitempty"`
 	ProjectDescription string                  `json:"project_description,omitempty"`
 	Resources          []ProjectResourceForEnv `json:"resources"`
+}
+
+// RewriteLocalDirectoryResourcesForWorktree returns an agent-facing copy of the
+// project resources for local_directory worktree mode. The persisted resource
+// must keep the user's configured local_path so future tasks can prepare their
+// worktree from it. During a run, however, local_path must name the task-local
+// worktree workdir so the brief and resources.json cannot point the agent back
+// at the user's original checkout.
+func RewriteLocalDirectoryResourcesForWorktree(resources []ProjectResourceForEnv, configuredPath, workDir string) []ProjectResourceForEnv {
+	if len(resources) == 0 || strings.TrimSpace(workDir) == "" {
+		return resources
+	}
+	configuredPath = strings.TrimSpace(configuredPath)
+	out := make([]ProjectResourceForEnv, len(resources))
+	copy(out, resources)
+	for i, resource := range out {
+		if resource.ResourceType != "local_directory" || len(resource.ResourceRef) == 0 {
+			continue
+		}
+		var ref map[string]any
+		if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+			continue
+		}
+		localPath, _ := ref["local_path"].(string)
+		if configuredPath != "" && strings.TrimSpace(localPath) != configuredPath {
+			continue
+		}
+		ref["local_path"] = workDir
+		ref["worktree_path"] = workDir
+		ref["execution_mode"] = "worktree"
+		data, err := json.Marshal(ref)
+		if err != nil {
+			continue
+		}
+		out[i].ResourceRef = data
+	}
+	return out
 }
 
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64

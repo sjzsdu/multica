@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS squad_workflow_run_parent_stage_uidx;

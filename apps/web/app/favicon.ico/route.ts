@@ -1,4 +1,5 @@
 /**
+/**
  * Legacy `/favicon.ico` requests point at the real SVG favicon.
  *
  * The `Location` is deliberately relative. `Response.redirect()` only accepts
@@ -37,3 +38,4 @@ export function GET() {
     headers: { Location: "/favicon.svg" },
   });
 }
+

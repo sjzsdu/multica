@@ -521,7 +521,10 @@ function LogLineRow({
       )}
       onClick={hasFields ? onToggle : undefined}
     >
-      <span className="shrink-0 tabular-nums text-muted-foreground">
+      <span
+        className="max-w-[7.5rem] shrink-0 truncate tabular-nums text-muted-foreground"
+        title={line.timestamp}
+      >
         {line.timestamp}
       </span>
       <LevelBadge level={line.level} />

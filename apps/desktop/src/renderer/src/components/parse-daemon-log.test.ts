@@ -27,6 +27,23 @@ describe("parseLogLine", () => {
     expect(parseLogLine("12:00:00.000 ERR something bad component=daemon", 1).level).toBe("ERROR");
   });
 
+  it("parses RFC3339 timestamps emitted by daemon builds that stamp the date", () => {
+    const r = parseLogLine(
+      "2026-11-07T21:20:37.860+08:00 INF task completed component=daemon task=c45266e5 status=completed",
+      1,
+    );
+    expect(r.timestamp).toBe("2026-11-07T21:20:37.860+08:00");
+    expect(r.level).toBe("INFO");
+    expect(r.message).toBe("task completed");
+    expect(r.fields.task).toBe("c45266e5");
+  });
+
+  it("parses a dated timestamp without a timezone offset", () => {
+    const r = parseLogLine("2026-11-07T21:20:37.860 WRN claim task failed component=daemon", 1);
+    expect(r.timestamp).toBe("2026-11-07T21:20:37.860");
+    expect(r.level).toBe("WARN");
+  });
+
   it("still accepts 4-letter level names (defensive against config changes)", () => {
     const r = parseLogLine("12:00:00.000 INFO regular component=daemon", 1);
     expect(r.level).toBe("INFO");

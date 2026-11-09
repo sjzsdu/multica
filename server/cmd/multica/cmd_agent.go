@@ -273,24 +273,41 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 
 	serverURL := resolveServerURL(cmd)
 	workspaceID := resolveWorkspaceID(cmd)
+	// A frozen environment can also point at the previous task's workspace;
+	// the credential file is this run's own. An explicit --workspace-id still
+	// wins, because that is the operator overriding the task identity on
+	// purpose.
+	if cred, _, ok := resolveDaemonIdentity(); ok && cred.WorkspaceID != "" && !cmd.Flags().Changed("workspace-id") {
+		workspaceID = cred.WorkspaceID
+	}
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
 	// When running inside a daemon task, attribute actions to the agent.
-	if agentID := os.Getenv("MULTICA_AGENT_ID"); agentID != "" {
+	agentID := os.Getenv("MULTICA_AGENT_ID")
+	taskID := os.Getenv("MULTICA_TASK_ID")
+	if cred, _, ok := resolveDaemonIdentity(); ok {
+		if cred.AgentID != "" {
+			agentID = cred.AgentID
+		}
+		if cred.TaskID != "" {
+			taskID = cred.TaskID
+		}
+	}
+	if agentID != "" {
 		client.AgentID = agentID
 	}
-	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
+	if taskID != "" {
 		client.TaskID = taskID
 	}
 	return client, nil
 }
 
 const (
-	defaultCloudServerURL = "https://api.multica.ai"
-	defaultCloudAppURL    = "https://multica.ai"
+	defaultCloudServerURL = "https://multica.wnbgj.com"
+	defaultCloudAppURL    = "https://multica.wnbgj.com"
 )
 
 func tryResolveServerURL(cmd *cobra.Command) string {
@@ -482,6 +499,83 @@ func daemonTaskContextMarkerPath() string {
 	}
 }
 
+// daemonTaskCredential is the decoded per-task credential file. Besides the
+// token it carries the identity fields the environment also provides, because
+// a runtime that freezes the environment freezes all of them together.
+type daemonTaskCredential struct {
+	Token       string
+	TaskID      string
+	WorkspaceID string
+	AgentID     string
+	AgentName   string
+}
+
+// daemonTaskCredentials walks up from the current working directory and
+// returns the first daemon-owned per-task credential file, or ok=false when
+// none is found.
+//
+// The daemon writes this file into the task workdir for every run. It is
+// authoritative over the environment because some runtimes keep a process
+// alive across tasks and freeze the environment of the run that started them
+// (jcode backs `jcode acp` with a shared server), so a resumed session can
+// carry a previous task's token — which the server has already revoked.
+func daemonTaskCredentials() (cred daemonTaskCredential, path string, ok bool) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return daemonTaskCredential{}, "", false
+	}
+	return taskCredentialsAtOrAbove(dir)
+}
+
+// taskCredentialsAtOrAbove is daemonTaskCredentials with an explicit start
+// directory, so the upward walk is testable without changing the process cwd.
+func taskCredentialsAtOrAbove(dir string) (cred daemonTaskCredential, path string, ok bool) {
+	for {
+		candidate := filepath.Join(dir, execenv.TaskCredentialsRelPath)
+		if data, err := os.ReadFile(candidate); err == nil {
+			var file struct {
+				ManagedBy   string `json:"managed_by"`
+				Token       string `json:"token"`
+				TaskID      string `json:"task_id"`
+				WorkspaceID string `json:"workspace_id"`
+				AgentID     string `json:"agent_id"`
+				AgentName   string `json:"agent_name"`
+			}
+			if json.Unmarshal(data, &file) == nil && file.ManagedBy == execenv.TaskCredentialsManagedBy {
+				if token := strings.TrimSpace(file.Token); token != "" {
+					return daemonTaskCredential{
+						Token:       token,
+						TaskID:      file.TaskID,
+						WorkspaceID: file.WorkspaceID,
+						AgentID:     file.AgentID,
+						AgentName:   file.AgentName,
+					}, candidate, true
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return daemonTaskCredential{}, "", false
+		}
+		dir = parent
+	}
+}
+
+// resolveDaemonIdentity returns the current task identity from the per-task
+// credential file the daemon wrote into this run's workdir. ok is false
+// outside a daemon task or when no credential file is reachable.
+//
+// The file wins over the environment because a runtime that keeps a process
+// alive across runs freezes the MULTICA_* values of the run that started it:
+// a resumed session's subprocess then reports the previous task's id,
+// workspace and agent along with its revoked token.
+func resolveDaemonIdentity() (cred daemonTaskCredential, path string, ok bool) {
+	if !inDaemonManagedExecutionContext() {
+		return daemonTaskCredential{}, "", false
+	}
+	return daemonTaskCredentials()
+}
+
 func resolveWorkspaceID(cmd *cobra.Command) string {
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {
@@ -494,7 +588,40 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	return cfg.WorkspaceID
+	if cfg.WorkspaceID != "" {
+		return cfg.WorkspaceID
+	}
+	return inferWorkspaceIDFromLocalDaemon(cmd)
+}
+
+func inferWorkspaceIDFromLocalDaemon(cmd *cobra.Command) string {
+	if inDaemonManagedExecutionContext() {
+		return ""
+	}
+	healthPort, err := daemonStatusHealthPort(cmd)
+	if err != nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, healthPort)
+	if health["status"] != "running" {
+		return ""
+	}
+	return singleWorkspaceIDFromDaemonHealth(health)
+}
+
+func singleWorkspaceIDFromDaemonHealth(health map[string]any) string {
+	workspaces, ok := health["workspaces"].([]any)
+	if !ok || len(workspaces) != 1 {
+		return ""
+	}
+	workspace, ok := workspaces[0].(map[string]any)
+	if !ok {
+		return ""
+	}
+	id, _ := workspace["id"].(string)
+	return strings.TrimSpace(id)
 }
 
 // requireWorkspaceID resolves the workspace ID and returns an error with

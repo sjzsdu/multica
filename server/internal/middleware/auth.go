@@ -17,6 +17,13 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
+func timestamptzLogString(ts pgtype.Timestamptz) string {
+	if !ts.Valid {
+		return ""
+	}
+	return ts.Time.UTC().Format(time.RFC3339Nano)
+}
+
 func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
 	if !auth.IsTemporarilyDisabledUser(userID, email) {
 		return false
@@ -81,6 +88,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// authority of that run's originator. MUL-3428, reported and
 			// fixed in #4313.
 			r.Header.Del("X-Agent-ID")
+			// Keep the client-supplied value for diagnostics only: the header is
+			// stripped above so nothing downstream can trust it, but an
+			// "invalid token" warning that cannot say which task the caller
+			// believed it was acting for cannot distinguish a misrouted
+			// credential from a missing row. Logged, never acted on.
+			rawTaskID := r.Header.Get("X-Task-ID")
 			r.Header.Del("X-Task-ID")
 
 			tokenString, fromCookie := extractToken(r)
@@ -115,7 +128,32 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				hash := auth.HashToken(tokenString)
 				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
 				if err != nil {
-					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					// Distinguish "never existed / expired" from "explicitly
+					// revoked". The active-token lookup filters revoked rows out,
+					// so a second lookup is needed; it keeps diagnostics on the
+					// 401 path without weakening the auth query itself.
+					if diag, diagErr := queries.GetTaskTokenByHashForRevocationCheck(r.Context(), hash); diagErr == nil && diag.RevokedAt.Valid {
+						slog.Warn("auth: task token revoked",
+							"event", "task_token_revoked",
+							"path", r.URL.Path,
+							"token_id", uuidToString(diag.ID),
+							"token_fingerprint", auth.HashFingerprint(hash),
+							"task_id", uuidToString(diag.TaskID),
+							"agent_id", uuidToString(diag.AgentID),
+							"workspace_id", uuidToString(diag.WorkspaceID),
+							"dispatched_at", timestamptzLogString(diag.DispatchedAt),
+							"revoked_at", timestamptzLogString(diag.RevokedAt),
+							"x_task_id", uuidToString(diag.TaskID),
+						)
+						writeError(w, http.StatusUnauthorized, "task_token_revoked")
+						return
+					}
+					slog.Warn("auth: invalid task token",
+						"event", "invalid_token",
+						"path", r.URL.Path,
+						"token_fingerprint", auth.HashFingerprint(hash),
+						"x_task_id", rawTaskID,
+						"error", err)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}

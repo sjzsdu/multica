@@ -209,7 +209,15 @@
     "description_placeholder": "¿Qué hace este agente?",
     "save": "Guardar",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "prop_fallback_runtimes": "Runtimes de reserva",
+    "fallback_hint": "Se prueban de arriba abajo cuando el runtime principal está bloqueado (cuota agotada, error de la CLI, modelo ausente). Los runtimes sin conexión siguen esperando en lugar de usar otro.",
+    "fallback_empty": "No hay runtimes de reserva. El agente solo se ejecuta en su runtime principal.",
+    "fallback_add": "Añadir runtime de reserva",
+    "fallback_add_empty": "No hay runtimes disponibles",
+    "fallback_remove_aria": "Quitar el runtime de reserva {{index}}",
+    "fallback_move_up_aria": "Subir el runtime de reserva {{index}}",
+    "fallback_move_down_aria": "Bajar el runtime de reserva {{index}}"
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",

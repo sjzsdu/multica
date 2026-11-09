@@ -93,3 +93,19 @@ func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])
 }
+
+// TokenFingerprint returns the short prefix of a token's SHA-256 hash used in
+// logs. It is derived from the same hash stored in task_token, so a fingerprint
+// printed at mint time can be matched against one printed at revocation or
+// auth failure without ever logging the token itself.
+func TokenFingerprint(token string) string {
+	return HashToken(token)[:8]
+}
+
+// HashFingerprint derives the log fingerprint from an already-computed hash.
+func HashFingerprint(hash string) string {
+	if len(hash) <= 8 {
+		return hash
+	}
+	return hash[:8]
+}

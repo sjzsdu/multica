@@ -4,9 +4,91 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+// TestWriteTaskCredentials covers the per-task credential file the CLI reads
+// when the inherited environment is stale (a runtime that reuses a long-lived
+// server across tasks). It must carry the token, be owner-only readable, and
+// be removable when the run ends.
+func TestWriteTaskCredentials(t *testing.T) {
+	workDir := t.TempDir()
+	path, err := WriteTaskCredentials(workDir, TaskCredentials{
+		Token:       "mat_task_token_abc",
+		TaskID:      "task-1",
+		WorkspaceID: "ws-1",
+		AgentID:     "agent-1",
+		AgentName:   "coder",
+	})
+	if err != nil {
+		t.Fatalf("WriteTaskCredentials: %v", err)
+	}
+	if want := filepath.Join(workDir, TaskCredentialsRelPath); path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read credentials: %v", err)
+	}
+	var cred taskCredentialsFile
+	if err := json.Unmarshal(data, &cred); err != nil {
+		t.Fatalf("unmarshal credentials: %v\n%s", err, string(data))
+	}
+	if cred.ManagedBy != TaskCredentialsManagedBy {
+		t.Fatalf("managed_by = %q, want %q", cred.ManagedBy, TaskCredentialsManagedBy)
+	}
+	if cred.Token != "mat_task_token_abc" || cred.TaskID != "task-1" || cred.AgentID != "agent-1" ||
+		cred.WorkspaceID != "ws-1" || cred.AgentName != "coder" {
+		t.Fatalf("unexpected payload: %+v", cred)
+	}
+
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat credentials: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("credentials mode = %04o, want 0600", perm)
+		}
+	}
+
+	// The reuse path rewrites the file for the new run's token.
+	if _, err := WriteTaskCredentials(workDir, TaskCredentials{Token: "mat_task_token_new", TaskID: "task-2"}); err != nil {
+		t.Fatalf("rewrite credentials: %v", err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("re-read credentials: %v", err)
+	}
+	if err := json.Unmarshal(data, &cred); err != nil {
+		t.Fatalf("unmarshal rewritten credentials: %v", err)
+	}
+	if cred.Token != "mat_task_token_new" || cred.TaskID != "task-2" {
+		t.Fatalf("rewrite did not replace the token: %+v", cred)
+	}
+
+	if err := RemoveTaskCredentials(workDir); err != nil {
+		t.Fatalf("RemoveTaskCredentials: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("credentials survived removal: %v", err)
+	}
+	if err := RemoveTaskCredentials(workDir); err != nil {
+		t.Fatalf("second RemoveTaskCredentials: %v", err)
+	}
+}
+
+func TestWriteTaskCredentialsRejectsMissingInputs(t *testing.T) {
+	if _, err := WriteTaskCredentials("", TaskCredentials{Token: "mat_token"}); err == nil {
+		t.Fatal("expected an error for an empty workdir")
+	}
+	if _, err := WriteTaskCredentials(t.TempDir(), TaskCredentials{Token: "  "}); err == nil {
+		t.Fatal("expected an error for an empty token")
+	}
+}
 
 // TestEnsureWorkspacesRootMarker covers the root-level daemon marker that
 // protects the whole workspaces tree. Regression for the confirmed escape

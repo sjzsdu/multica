@@ -128,6 +128,13 @@ describe("runtimeDisplayLabel", () => {
         provider: "zcode",
       }),
     ).toBe("box (ZCode)");
+    expect(
+      runtimeDisplayLabel({
+        name: "OpenClaude (host)",
+        custom_name: "box",
+        provider: "openclaude",
+      }),
+    ).toBe("box (OpenClaude)");
   });
 
   it("first-letter-capitalizes non-overridden slugs, matching the daemon", () => {

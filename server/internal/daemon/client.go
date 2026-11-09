@@ -206,6 +206,7 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
+		protocol.DaemonCapabilityLocalSparseWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
@@ -636,7 +637,17 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 }
 
 func (c *Client) completeTaskWithRetrySchedule(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+	return c.completeTaskWithRetryScheduleAt(ctx, taskID, output, branchName, sessionID, workDir, sessionRolloutMissing, retiredSessionID, durableWorkDir, "", schedule)
+}
+
+// completeTaskWithRetryScheduleAt sends this delivery's claim generation so the
+// server can revoke only tokens minted at or before it, instead of every token
+// ever minted for the task.
+func (c *Client) completeTaskWithRetryScheduleAt(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir, dispatchedAt string, schedule []time.Duration) error {
 	body := map[string]any{"output": output}
+	if dispatchedAt != "" {
+		body["dispatched_at"] = dispatchedAt
+	}
 	if branchName != "" {
 		body["branch_name"] = branchName
 	}
@@ -687,7 +698,15 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 }
 
 func (c *Client) failTaskWithRetrySchedule(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, schedule []time.Duration) error {
+	return c.failTaskWithRetryScheduleAt(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, "", schedule)
+}
+
+// failTaskWithRetryScheduleAt mirrors completeTaskWithRetryScheduleAt.
+func (c *Client) failTaskWithRetryScheduleAt(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir, dispatchedAt string, schedule []time.Duration) error {
 	body := map[string]any{"error": errMsg}
+	if dispatchedAt != "" {
+		body["dispatched_at"] = dispatchedAt
+	}
 	if sessionID != "" {
 		body["session_id"] = sessionID
 	}
@@ -1380,6 +1399,24 @@ func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respB
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// TaskTokenWhoami is the read-only identity a mat_ token is bound to.
+type TaskTokenWhoami struct {
+	TaskID      string `json:"task_id"`
+	AgentID     string `json:"agent_id"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// GetTaskTokenWhoami asks the server which task a task-scoped token belongs to.
+// It uses the token under inspection, not the daemon credential, so a reused
+// or misrouted MULTICA_TOKEN cannot pass by authenticating as the daemon.
+func (c *Client) GetTaskTokenWhoami(ctx context.Context, token string) (TaskTokenWhoami, error) {
+	var out TaskTokenWhoami
+	if err := c.getJSONWithToken(ctx, "/api/task-token/whoami", token, &out); err != nil {
+		return TaskTokenWhoami{}, err
+	}
+	return out, nil
 }
 
 // postJSONWithToken is getJSONWithToken's write counterpart, for the daemon's
