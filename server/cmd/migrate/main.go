@@ -141,7 +141,7 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
 	"613_skill_version_index":                                   "idx_skill_version_skill_version",
-	"607_task_token_generation_idx":                             "task_token_task_generation_idx",
+	"624_task_token_generation_idx":                             "task_token_task_generation_idx",
 	"606_agent_task_queue_runtime_active_index":                 "idx_agent_task_queue_runtime_active",
 	"604_wecom_install_session_begin_rate_idx":                  "idx_wecom_install_session_begin_rate",
 	"603_wecom_install_session_agent_pending_idx":               "idx_wecom_install_session_agent_pending",
@@ -151,9 +151,9 @@ var concurrentIndexCleanups = map[string]string{
 	"563_search_index_change_changed_at_index":                  "idx_search_index_change_changed_at",
 	"434_squad_workflow_policy_squad_idx":                       "squad_workflow_policy_squad_uidx",
 	"436_squad_workflow_run_parent_stage_idx":                   "squad_workflow_run_parent_stage_uidx",
-	"601_squad_workflow_run_id_idx":                             "squad_workflow_run_id_uidx",
-	"603_squad_workflow_approval_key_idx":                       "squad_workflow_approval_key_uidx",
-	"604_squad_workflow_approval_id_idx":                        "squad_workflow_approval_id_uidx",
+	"618_squad_workflow_run_id_idx":                             "squad_workflow_run_id_uidx",
+	"620_squad_workflow_approval_key_idx":                       "squad_workflow_approval_key_uidx",
+	"621_squad_workflow_approval_id_idx":                        "squad_workflow_approval_id_uidx",
 	"562_search_index_change_workspace_index":                   "idx_search_index_change_workspace_xid",
 	"552_agent_task_history_page_index":                         "idx_agent_task_queue_history_page",
 	"535_github_pr_address_index":                               "idx_github_pull_request_pr_owner_repo",

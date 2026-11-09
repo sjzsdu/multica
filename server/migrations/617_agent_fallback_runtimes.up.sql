@@ -4,9 +4,9 @@
 -- model not found, CLI not executable, ...). Waitable verdicts (runtime
 -- offline) still queue and wait — falling back would waste resources on a
 -- second machine when the first will recover by itself.
--- Renumbered from 589 (origin/main now owns 589-599). Deployments that already
--- applied the old stem re-execute this file under the new version, so the DDL
--- must be idempotent.
+-- Renumbered twice (589, then 600) as origin/main claimed those ranges.
+-- Deployments that already applied an old stem re-execute this file under the
+-- new version, so the DDL must be idempotent.
 ALTER TABLE agent ADD COLUMN IF NOT EXISTS fallback_runtimes JSONB NOT NULL DEFAULT '[]';
 
 -- System-level singleton config: one row (id = 1) holding global settings
