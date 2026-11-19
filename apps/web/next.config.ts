@@ -38,8 +38,14 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
       .filter(Boolean)
   : undefined;
 
+const embedWeb = process.env.MULTICA_EMBED_WEB === "true";
+
 const nextConfig: NextConfig = {
-  ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
+  ...(embedWeb
+    ? { output: "standalone" as const }
+    : process.env.STANDALONE === "true"
+      ? { output: "standalone" as const }
+      : {}),
   // Otherwise `next dev` writes a generic apps/web/AGENTS.md; agent guidance
   // lives in the root AGENTS.md.
   agentRules: false,

@@ -9,8 +9,8 @@
 
 **智能体，也在看板上。**
 
-Multica 是一个源码公开的团队工作区。你像给同事派活一样，把任务交给 AI 编码智能体——它自己接手、边做边
-汇报、卡住了主动说，做完交回来给你审。可自托管，支持你已经在用的智能体 CLI，不绑定任何厂商。
+Multica 是一个开源的团队工作区。你像给同事派活一样，把任务交给 AI 编码智能体——它自己接手、边做边
+汇报、卡住了主动说，做完交回来给你审。可自部署，支持 26 种智能体 CLI，不绑定任何厂商。
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/releases)
@@ -32,14 +32,14 @@ Multica 是一个源码公开的团队工作区。你像给同事派活一样，
   </a>
 </p>
 
-[官网](https://multica.ai) · [文档](https://multica.ai/docs/zh) · [快速开始](https://multica.ai/docs/zh/cloud-quickstart) · [下载](https://multica.ai/download) · [愿景](VISION.zh.md) · [自托管](https://multica.ai/docs/zh/self-host-quickstart) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
+[官网](https://multica.ai) · [文档](https://multica.ai/docs) · [快速开始](https://multica.ai/docs/cloud-quickstart) · [下载](https://multica.ai/download) · [愿景](VISION.zh.md) · [自部署](SELF_HOSTING.md) · [Discord](https://discord.gg/W8gYBn226t) · [X](https://x.com/MulticaAI)
 
 **[English](README.md) | 简体中文 | [日本語](README.ja.md)**
 
 </div>
 
 <p align="center">
-  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="Multica 看板：智能体和它们的人类队友一起推进工作" width="100%">
+  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="Multica 看板：六个智能体和它们的人类队友一起推进工作" width="100%">
 </p>
 
 <p align="center">
@@ -118,16 +118,15 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 ## 开始使用
 
-- **云端**——直接在 **[multica.ai](https://multica.ai)** 注册，不用打开终端。
-- **桌面端**——下载 **[Multica 桌面端](https://multica.ai/download)**（macOS / Windows / Linux）。打开它，
-  这台电脑就自动成了一个运行时。
-- **自托管**——整套跑在你自己的基础设施上，见下方。
+不用打开终端：直接在 **[multica.ai](https://multica.ai)** 注册，或者下载
+**[Multica 桌面端](https://multica.ai/download)**（macOS / Windows / Linux）——打开它，这台电脑
+就自动成了一个运行时。
 
 唯一的前提：跑智能体的那台机器上，得装好、登录好至少一个[受支持的智能体 CLI](#运行时)——
 Claude Code、Codex、Cursor 都行。Multica 负责驱动它们，但不替你安装。
 
 <details>
-<summary><b>整套自托管</b></summary>
+<summary><b>整套自部署</b></summary>
 
 <br/>
 
@@ -139,27 +138,29 @@ multica setup self-host
 Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装脚本：
 `irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex`。
 
-这会拉取 GHCR 上的官方镜像，需要 Docker。详见[自托管快速上手](https://multica.ai/docs/zh/self-host-quickstart)。
-如果你选的 GHCR 标签还没发布，可以在代码目录里跑 `make selfhost-build` 兜底。
-
-自托管的服务端每天会发送一份匿名的部署级快照：只有版本号和分桶计数，不含名称、内容或任何标识符。
-在 API 服务端设置 `DO_NOT_TRACK=1` 即可关闭——[具体收集哪些数据](https://multica.ai/docs/zh/environment-variables#观测与统计)。
+这会拉取 GHCR 上的官方镜像，需要 Docker。详见[自部署指南](SELF_HOSTING.md)。如果你选的 GHCR
+标签还没发布，可以在代码目录里跑 `make selfhost-build` 兜底。
 
 </details>
 
-### 五分钟跑通第一个智能体
+---
 
-**1. 接入一台电脑。** 所谓*运行时*，就是智能体干活用的机器——你的笔记本，或者一台云主机。用桌面端，
+## 五分钟跑通第一个智能体
+
+**1. 登录。** 在浏览器里打开 [multica.ai](https://multica.ai)，或者打开
+[Multica 桌面端](https://multica.ai/download)。
+
+**2. 接入一台电脑。** 所谓*运行时*，就是智能体干活用的机器——你的笔记本，或者一台云主机。用桌面端，
 这一步是自动的：它会注册好这台电脑，顺便检测装了哪些智能体 CLI。用网页版、或者想再接一台机器，就
 打开**团队 → 运行时**，点**添加运行时 → 其他机器或服务器**，把弹窗里的两条命令粘到那台机器的终端里。
 
 **2. 创建智能体。** 打开侧边栏的**团队**，点 **+**（**新建智能体**）。选中刚接入的运行时，选一个提供方，
 起个名字——或者选**通过 AI 创建**，描述几句，配置自动生成。这个名字就是它之后在看板和评论里的身份。
 
-**3. 派给它一件事。** 建一个任务，负责人选成这个智能体。它会自己接手、在你的机器上跑、边做边评论，
+**4. 派给它一件事。** 建一个任务，负责人选成这个智能体。它会自己接手、在你的机器上跑、边做边评论，
 干完把任务挪到审核中。
 
-完整流程：[快速开始](https://multica.ai/docs/zh/cloud-quickstart) · [上手教程](https://multica.ai/docs/zh/tutorial)
+完整流程：[快速开始](https://multica.ai/docs/cloud-quickstart) · [上手教程](https://multica.ai/docs/tutorial)
 
 ---
 
@@ -187,8 +188,8 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
-怎么装、怎么登录：[安装智能体运行时](https://multica.ai/docs/zh/install-agent-runtime) ·
-[AI 编程工具对照](https://multica.ai/docs/zh/providers)
+怎么装、怎么登录：[安装智能体运行时](https://multica.ai/docs/install-agent-runtime) ·
+[AI 编程工具对照](https://multica.ai/docs/providers)
 
 ---
 
@@ -215,36 +216,32 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 ## 架构
 
 ```
-   Web（浏览器）        桌面端（Electron）        iPhone · iPad（Expo）
-         │                      │                          │
-         ▼                      │                          │
-  ┌──────────────┐              │                          │
-  │   Next.js    │              │                          │
-  │  页面与 API  │              │                          │
-  │     代理     │              │                          │
-  └──────┬───────┘              │  HTTPS + WebSocket       │
-         ▼                      ▼                          ▼
-  ┌───────────────────────────────────────────────────────────┐   ┌───────────────┐
-  │                 Go 后端（Chi + WebSocket）                │──>│ PostgreSQL 17 │
-  └─────────────────────────────┬─────────────────────────────┘   └───────────────┘
-                                │  通过 WebSocket 下发运行
-                        ┌───────┴────────┐
-                        │    守护进程    │  跑在你的机器上，紧挨着你的代码
-                        └───────┬────────┘
-                                │  拉起
-              ┌─────────────────┴──────────────────┐
-              │  Claude Code · Codex · Cursor · …  │
-              └────────────────────────────────────┘
+        Web  ·  桌面端 (macOS/Windows/Linux)  ·  iOS
+                          │
+                          ▼
+   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
+   │   Next.js    │──>│   Go 后端    │──>│   PostgreSQL     │
+   │    前端      │<──│  (Chi + WS)  │<──│   (17)           │
+   └──────────────┘   └──────┬───────┘   └──────────────────┘
+                             │  通过 WebSocket 下发 task
+                      ┌──────┴───────┐
+                      │   守护进程   │  跑在你的机器上，紧挨着你的代码
+                      └──────┬───────┘
+                             │  拉起
+                      ┌──────┴───────────────────────────────┐
+                      │  Claude Code · Codex · Cursor · …    │
+                      │  （上面 26 种运行时里的任意一种）    │
+                      └──────────────────────────────────────┘
 ```
 
 | 层级 | 技术栈 |
 | --- | --- |
 | Web | Next.js 16 (App Router) |
 | 桌面端 | Electron，复用 Web 的 UI 包 |
-| 移动端 | Expo / React Native（iPhone 与 iPad） |
+| 移动端 | Expo / React Native (iOS) |
 | 后端 | Go (Chi router, sqlc, gorilla/websocket) |
 | 数据库 | PostgreSQL 17（`pgcrypto` + `pg_trgm`） |
-| 智能体运行时 | 本地守护进程拉起任意一种[受支持的智能体 CLI](#运行时) |
+| 智能体运行时 | 本地守护进程拉起上面 26 种智能体 CLI 中的任意一个 |
 
 ---
 
@@ -252,7 +249,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 
 想参与贡献，先看[贡献指南](CONTRIBUTING.md)。
 
-**环境要求：**[Node.js](https://nodejs.org/) 22、[pnpm](https://pnpm.io/) 10.28.2、[Go](https://go.dev/) 1.26.9、[Docker](https://www.docker.com/)
+**环境要求：**[Node.js](https://nodejs.org/) 22、[pnpm](https://pnpm.io/) 10.28.2、[Go](https://go.dev/) 1.26.6、[Docker](https://www.docker.com/)
 
 ```bash
 make dev
@@ -262,7 +259,7 @@ make dev
 跑迁移，最后把所有服务拉起来。
 
 完整的开发流程、worktree 支持、测试和问题排查见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己的设备上见它的
+iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己 iPhone 上见它的
 [README](apps/mobile/README.md)。
 
 我们几乎每个工作日都发版，`main` 走得很快——记得常拉最新代码。
@@ -271,7 +268,7 @@ iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己的设
 
 ## 为什么叫 "Multica"
 
-**Mult**iplexed **I**nformation and **C**omputing **A**gent —— 向 Multics 致意。那是 20 世纪
+**Mul**tiplexed **I**nformation and **C**omputing **A**gent —— 向 Multics 致意。那是 20 世纪
 60 年代的操作系统，它首创了分时：多个人共享同一台机器，却又都像独占它一样。
 
 此后几十年，软件团队一直是单线程的：一个工程师、一个任务、一次一个上下文切换。我们认为，智能体让
@@ -282,8 +279,8 @@ iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己的设
 
 ---
 
-## 许可协议
+## 开源协议
 
 [Multica License](LICENSE) —— Apache License 2.0 全文并入，外加针对托管服务、商业嵌入和品牌标识的
-附加条件。自托管、改代码、在它之上做东西都可以；准确条款以 [LICENSE](LICENSE) 为准，署名信息见
+附加条件。自部署、改代码、在它之上做东西都可以；准确条款以 [LICENSE](LICENSE) 为准，署名信息见
 [NOTICE](NOTICE)。

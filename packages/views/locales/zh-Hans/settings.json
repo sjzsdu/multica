@@ -541,6 +541,16 @@
       "start_date": "开始日期"
     }
   },
+  "fallback_runtime": {
+    "title": "运行时兜底",
+    "description": "当智能体的主运行时和它自己的备用链都无法执行时，所有工作区都会退到这里的运行时。",
+    "empty": "还没有配置全局兜底运行时。",
+    "hint": "运行时取自当前工作区；不选模型时使用该运行时的默认模型。",
+    "admin_only": "只有工作区所有者和管理员可以修改。",
+    "saved": "全局兜底运行时已更新。",
+    "save_error": "全局兜底运行时保存失败。",
+    "load_error": "全局兜底运行时加载失败。"
+  },
   "mcp": {
     "description": "添加后需在智能体的 MCP 页面分配。",
     "servers_title": "共享 MCP 服务器",
@@ -592,6 +602,7 @@
       "quick_actions": "快捷操作",
       "plugins": "插件",
       "mcp": "MCP 服务器",
+      "fallback_runtime": "运行时兜底",
       "billing": "账单与套餐",
       "code": "代码",
       "channels": "消息渠道",
@@ -983,6 +994,13 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "storage_section": "存储",
+    "storage_migration_label": "本地文件迁移",
+    "storage_migration_pending": "还有 {{attachments}} 个附件和 {{avatars}} 个头像保存在服务器本地磁盘上。",
+    "storage_migration_running": "正在迁移到对象存储……已迁移 {{migrated}} 个，失败 {{failed}} 个。",
+    "storage_migration_finished": "已将 {{migrated}} 个文件迁移到对象存储，失败 {{failed}} 个。",
+    "storage_migration_start": "迁移文件",
+    "storage_migration_start_failed": "启动存储迁移失败。",
     "section_general": "工作区信息",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",

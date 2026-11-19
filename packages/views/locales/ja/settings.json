@@ -541,6 +541,16 @@
       "start_date": "開始日"
     }
   },
+  "fallback_runtime": {
+    "title": "ランタイムフォールバック",
+    "description": "エージェントのプライマリランタイムと独自のフォールバックチェーンがどちらもブロックされた場合、すべてのワークスペースがここのランタイムにフォールバックします。",
+    "empty": "グローバルフォールバックランタイムは未設定です。",
+    "hint": "ランタイムはこのワークスペースから選択します。モデルを選ばない場合はランタイムの既定モデルを使用します。",
+    "admin_only": "変更できるのはワークスペースのオーナーと管理者だけです。",
+    "saved": "グローバルフォールバックランタイムを更新しました。",
+    "save_error": "グローバルフォールバックランタイムを保存できませんでした。",
+    "load_error": "グローバルフォールバックランタイムを読み込めませんでした。"
+  },
   "mcp": {
     "description": "追加後、エージェントの MCP タブで割り当てます。",
     "servers_title": "共有サーバー",
@@ -592,6 +602,7 @@
       "quick_actions": "クイックアクション",
       "plugins": "プラグイン",
       "mcp": "MCP サーバー",
+      "fallback_runtime": "ランタイムフォールバック",
       "billing": "請求とプラン",
       "code": "コード",
       "channels": "メッセージング",
@@ -983,6 +994,13 @@
     "usage_help": "使い方"
   },
   "workspace": {
+    "storage_section": "ストレージ",
+    "storage_migration_label": "ローカルファイルの移行",
+    "storage_migration_pending": "添付ファイル {{attachments}} 件とアバター {{avatars}} 件がまだこのサーバーのローカルディスクにあります。",
+    "storage_migration_running": "オブジェクトストレージへ移動中… {{migrated}} 件移動、{{failed}} 件失敗。",
+    "storage_migration_finished": "オブジェクトストレージへ {{migrated}} 件のファイルを移動しました（{{failed}} 件失敗）。",
+    "storage_migration_start": "ファイルを移行",
+    "storage_migration_start_failed": "ストレージ移行の開始に失敗しました。",
     "section_general": "ワークスペース情報",
     "logo_label": "ワークスペースのアイコン",
     "name_label": "名前",

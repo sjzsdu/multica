@@ -70,6 +70,7 @@ import { localDirectoryLabel } from "./local-directory-label";
 import { buildRuntimeMachines } from "../../runtimes/components/runtime-machines";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
+import { applyGitHubSSHHostAlias } from "./github-ssh-alias";
 
 // Project Resources sidebar section.
 //
@@ -108,6 +109,20 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
+function inferSingleOnlineLocalDaemonId(runtimes: readonly AgentRuntime[]): string | null {
+  const daemonIds = new Set<string>();
+  for (const runtime of runtimes) {
+    if (
+      runtime.runtime_mode === "local" &&
+      runtime.status === "online" &&
+      runtime.daemon_id
+    ) {
+      daemonIds.add(runtime.daemon_id);
+    }
+  }
+  return daemonIds.size === 1 ? [...daemonIds][0] ?? null : null;
+}
+
 /**
  * A user-typed clone URL, as opposed to a search for a workspace repository.
  * Accepts the same shapes as the server's isValidGitRepoURL: a URL with a
@@ -143,10 +158,17 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const others = resources.filter(
     (r) => !isGithubRef(r) && !isLocalDirectoryRef(r),
   );
-  // Picking a folder needs the desktop's daemon_id, so web cannot add one. It
-  // still lists existing folders, and changing their mode or removing them
-  // only rewrites the resource, which works from anywhere.
+  // The desktop picker uses its own daemon. Web can still list and edit every
+  // folder, and can enter a path manually when exactly one online local daemon
+  // owned by the user makes the target unambiguous.
   const desktopMode = isDesktopShell();
+
+  // Web has no Electron preload, so a single online local daemon owned by the
+  // signed-in user is the browser's only unambiguous manual-folder target.
+  const { data: myRuntimes = [] } = useQuery(runtimeListOptions(wsId, "me"));
+  const inferredWebDaemonId = desktopMode
+    ? null
+    : inferSingleOnlineLocalDaemonId(myRuntimes);
 
   return (
     <div>
@@ -163,12 +185,13 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       {open && (
         <div className="space-y-4 pl-2">
           <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
-          {(desktopMode || folders.length > 0) && (
+          {(desktopMode || folders.length > 0 || inferredWebDaemonId !== null) && (
             <LocalFolderGroup
               wsId={wsId}
               projectId={projectId}
               folders={folders}
               desktopMode={desktopMode}
+              inferredWebDaemonId={inferredWebDaemonId}
             />
           )}
           {others.map((resource) => (
@@ -274,13 +297,16 @@ function RepositoryGroup({
   const [addOpen, setAddOpen] = useState(false);
   const attachedUrls = new Set(repos.map((r) => r.resource_ref.url));
 
-  const handleAttach = async (url: string, ref?: string) => {
+  const handleAttach = async (url: string, ref?: string, ghAccount = "") => {
     try {
       await createResource.mutateAsync({
         resource_type: "github_repo",
         // Omit the key entirely when empty rather than sending "": an absent
         // ref is what "use the default branch" looks like on the wire.
-        resource_ref: ref ? { url, ref } : { url },
+        resource_ref: {
+          ...(ref ? { url, ref } : { url }),
+          ...(ghAccount.trim() ? { gh_account: ghAccount.trim() } : {}),
+        },
       });
       toast.success(t(($) => $.resources.toast_attached));
       setAddOpen(false);
@@ -350,11 +376,13 @@ function AddRepositoryPanel({
   workspaceRepos: { url: string; description?: string | null }[];
   attachedUrls: Set<string>;
   busy: boolean;
-  onAttach: (url: string, ref?: string) => Promise<void>;
+  onAttach: (url: string, ref?: string, ghAccount?: string) => Promise<void>;
 }) {
   const { t } = useT("projects");
   const [query, setQuery] = useState("");
   const [ref, setRef] = useState("");
+  const [sshHostAlias, setSSHHostAlias] = useState("");
+  const [ghAccount, setGhAccount] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const isUrl = looksLikeRepoUrl(query);
   const refInvalid = isUrl && githubRefHasError(ref);
@@ -377,9 +405,14 @@ function AddRepositoryPanel({
   const submitUrl = async () => {
     const url = query.trim();
     if (!url || refInvalid || submitting) return;
+    const resolved = applyGitHubSSHHostAlias(url, sshHostAlias);
+    if (sshHostAlias.trim() && !resolved.applied) {
+      toast.error(t(($) => $.resources.ssh_alias_invalid_url));
+      return;
+    }
     setSubmitting(true);
     try {
-      await onAttach(url, ref.trim() || undefined);
+      await onAttach(resolved.url, ref.trim() || undefined, ghAccount);
     } finally {
       setSubmitting(false);
     }
@@ -423,6 +456,34 @@ function AddRepositoryPanel({
             onChange={setRef}
             onSubmit={() => void submitUrl()}
           />
+          <div className="space-y-1">
+            <input
+              type="text"
+              value={sshHostAlias}
+              onChange={(e) => setSSHHostAlias(e.target.value)}
+              aria-label={t(($) => $.resources.ssh_alias_label)}
+              placeholder={t(($) => $.resources.ssh_alias_placeholder)}
+              spellCheck={false}
+              className="h-8 w-full rounded-md border bg-transparent px-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.resources.ssh_alias_hint)}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <input
+              type="text"
+              value={ghAccount}
+              onChange={(e) => setGhAccount(e.target.value)}
+              aria-label={t(($) => $.resources.gh_account_label)}
+              placeholder={t(($) => $.resources.gh_account_placeholder)}
+              spellCheck={false}
+              className="h-8 w-full rounded-md border bg-transparent px-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.resources.gh_account_hint)}
+            </p>
+          </div>
           <Button
             size="sm"
             className="w-full"
@@ -529,6 +590,7 @@ function GithubRepoRow({
           />
           <TooltipContent side="top">{ref.url}</TooltipContent>
         </Tooltip>
+        <GithubRepoPreferences resource={resource} />
         <RemoveButton onRemove={remove} removing={removing} />
       </div>
       {/* The branch gets its own line rather than a badge beside the name: a
@@ -543,6 +605,113 @@ function GithubRepoRow({
         )}
       </div>
     </div>
+  );
+}
+
+function GithubRepoPreferences({ resource }: { resource: GithubResource }) {
+  const { t } = useT("projects");
+  const updateResource = useUpdateProjectResource(
+    resource.workspace_id,
+    resource.project_id,
+  );
+  const ref = resource.resource_ref;
+  const currentUrl = ref.url;
+  const currentAccount = ref.gh_account ?? "";
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState(currentUrl);
+  const [ghAccount, setGhAccount] = useState(currentAccount);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleOpenChange = (next: boolean) => {
+    if (saving) return;
+    setOpen(next);
+    if (next) {
+      setUrl(currentUrl);
+      setGhAccount(currentAccount);
+      setError(null);
+    }
+  };
+
+  const save = async () => {
+    const nextUrl = url.trim();
+    const nextAccount = ghAccount.trim();
+    if (saving || !nextUrl) return;
+    if (nextUrl === currentUrl && nextAccount === currentAccount) {
+      setOpen(false);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await updateResource.mutateAsync({
+        resourceId: resource.id,
+        data: {
+          resource_ref: {
+            ...ref,
+            url: nextUrl,
+            gh_account: nextAccount || undefined,
+          },
+        },
+      });
+      toast.success(t(($) => $.resources.toast_github_updated));
+      setOpen(false);
+    } catch (err) {
+      setError(errorMessage(err, t(($) => $.resources.toast_attach_failed)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <TooltipHint label={t(($) => $.resources.github_edit_tooltip)}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={t(($) => $.resources.github_edit_tooltip)}
+              className="shrink-0 rounded-sm p-0.5 opacity-0 transition-opacity hover:bg-accent focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <Pencil className="size-3 text-muted-foreground" />
+            </button>
+          }
+        />
+      </TooltipHint>
+      <PopoverContent align="end" className="w-72 gap-2 p-2">
+        <input
+          type="text"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          aria-label={t(($) => $.resources.github_remote_url_label)}
+          spellCheck={false}
+          className="h-8 w-full rounded-md border bg-transparent px-2 text-caption outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <input
+          type="text"
+          value={ghAccount}
+          onChange={(event) => setGhAccount(event.target.value)}
+          aria-label={t(($) => $.resources.gh_account_label)}
+          placeholder={t(($) => $.resources.gh_account_placeholder)}
+          spellCheck={false}
+          className="h-8 w-full rounded-md border bg-transparent px-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        {error && <InlineError message={error} />}
+        <div className="flex justify-end gap-1.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setOpen(false)}
+            disabled={saving}
+          >
+            {t(($) => $.resources.ref_cancel)}
+          </Button>
+          <Button size="sm" onClick={() => void save()} disabled={saving || !url.trim()}>
+            {t(($) => $.resources.ref_save)}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -665,15 +834,24 @@ function LocalFolderGroup({
   projectId,
   folders,
   desktopMode,
+  inferredWebDaemonId,
 }: {
   wsId: string;
   projectId: string;
   folders: LocalDirectoryResource[];
   desktopMode: boolean;
+  inferredWebDaemonId: string | null;
 }) {
   const { t } = useT("projects");
   const daemonStatus = useLocalDaemonStatus();
-  const localDaemonId = daemonStatus.daemonId;
+  const localDaemonId = daemonStatus.daemonId ?? inferredWebDaemonId;
+  const localDaemonRunning =
+    daemonStatus.running || inferredWebDaemonId !== null;
+  const effectiveDaemonStatus: LocalDaemonStatus = {
+    ...daemonStatus,
+    daemonId: localDaemonId,
+    running: localDaemonRunning,
+  };
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   // Whether this server checks execution_mode on save at all. One declared
   // boolean, no inference — servers that predate it drop execution_mode and
@@ -716,7 +894,7 @@ function LocalFolderGroup({
       <p className="-mt-1 text-micro text-muted-foreground">
         {t(($) => $.resources.local_group_hint)}
       </p>
-      {desktopMode && (
+      {(desktopMode || inferredWebDaemonId !== null) && (
         <MachineBlock
           current
           title={currentTitle ?? t(($) => $.resources.local_this_computer)}
@@ -735,8 +913,9 @@ function LocalFolderGroup({
             <LocalFolderSlot
               wsId={wsId}
               projectId={projectId}
-              daemonStatus={daemonStatus}
+              daemonStatus={effectiveDaemonStatus}
               runtimes={runtimes}
+              desktopMode={desktopMode}
               serverValidatesWorktree={serverValidatesWorktree}
             />
           )}
@@ -806,10 +985,12 @@ function LocalFolderRow({
   current: boolean;
   serverValidatesWorktree: boolean;
 }) {
+  const { t } = useT("projects");
   const { remove, removing } = useRemoveResource(resource);
   // The name is the folder's own (or whatever a label update stored); there is
   // deliberately no rename. A folder is identified by its path (MUL-7525).
   const display = localDirectoryLabel(resource);
+  const ref = resource.resource_ref;
 
   return (
     // Folders on other machines are de-emphasised but stay editable: dropping
@@ -823,16 +1004,30 @@ function LocalFolderRow({
             render={<span className="min-w-0 flex-1 truncate">{display}</span>}
           />
           <TooltipContent side="top">
-            <span className="font-mono text-micro">{resource.resource_ref.local_path}</span>
+            <span className="font-mono text-micro">{ref.local_path}</span>
           </TooltipContent>
         </Tooltip>
         <RemoveButton onRemove={remove} removing={removing} />
       </div>
-      <div className="pl-[1.375rem] pt-0.5">
+      <div className="flex min-w-0 items-center gap-1.5 pl-[1.375rem] pt-0.5">
         <ExecutionModeChip
           resource={resource}
           serverValidatesWorktree={serverValidatesWorktree}
         />
+        {executionModeOf(ref) === "worktree" && (ref.sparse_paths?.length ?? 0) > 0 && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className={chipClassName}>
+                  {t(($) => $.resources.sparse_badge)}
+                </span>
+              }
+            />
+            <TooltipContent side="top" className="whitespace-pre-line">
+              {ref.sparse_paths?.join("\n")}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );
@@ -857,19 +1052,28 @@ function ExecutionModeChip({
   );
   const ref = resource.resource_ref;
   const mode = executionModeOf(ref);
+  const currentSparsePaths = ref.sparse_paths ?? [];
   const [open, setOpen] = useState(false);
+  const [draftMode, setDraftMode] = useState(mode);
+  const [sparseDraft, setSparseDraft] = useState(currentSparsePaths.join("\n"));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sparsePathsId = `local-directory-sparse-paths-${resource.id}`;
 
   const handleOpenChange = (next: boolean) => {
     if (saving) return;
     setOpen(next);
-    if (next) setError(null);
+    if (next) {
+      setDraftMode(mode);
+      setSparseDraft(currentSparsePaths.join("\n"));
+      setError(null);
+    }
   };
 
-  const choose = async (next: LocalDirectoryExecutionMode) => {
+  const save = async (next: LocalDirectoryExecutionMode, sparseText: string) => {
     if (saving) return;
-    if (next === mode) {
+    const sparsePaths = next === "worktree" ? parseSparsePathsText(sparseText) : [];
+    if (next === mode && sameStringArray(currentSparsePaths, sparsePaths)) {
       setOpen(false);
       return;
     }
@@ -880,7 +1084,17 @@ function ExecutionModeChip({
         resourceId: resource.id,
         // Spread first so every other ref field survives the edit — the server
         // replaces the whole ref, it does not deep-merge.
-        data: { resource_ref: { ...ref, execution_mode: next } },
+        data: {
+          resource_ref: {
+            ...ref,
+            execution_mode: next,
+            ...(sparsePaths.length > 0
+              ? { sparse_paths: sparsePaths }
+              : ref.sparse_paths !== undefined
+                ? { sparse_paths: undefined }
+                : {}),
+          },
+        },
       });
       toast.success(t(($) => $.resources.toast_local_mode_updated));
       setOpen(false);
@@ -891,6 +1105,11 @@ function ExecutionModeChip({
     } finally {
       setSaving(false);
     }
+  };
+
+  const choose = (next: LocalDirectoryExecutionMode) => {
+    setDraftMode(next);
+    void save(next, sparseDraft);
   };
 
   return (
@@ -916,11 +1135,39 @@ function ExecutionModeChip({
             the browser; unknown git status keeps the option available and the
             daemon has the final say. */}
         <LocalDirectoryModeOptions
-          value={mode}
-          onChange={(next) => void choose(next)}
+          value={draftMode}
+          onChange={choose}
           unavailableReason={worktreeUnavailableReason(undefined, serverValidatesWorktree)}
         />
+        {draftMode === "worktree" && (
+          <div className="space-y-1.5">
+            <label className="text-caption font-medium" htmlFor={sparsePathsId}>
+              {t(($) => $.resources.sparse_paths_label)}
+            </label>
+            <textarea
+              id={sparsePathsId}
+              value={sparseDraft}
+              onChange={(event) => setSparseDraft(event.target.value)}
+              placeholder={t(($) => $.resources.sparse_paths_placeholder)}
+              rows={3}
+              disabled={saving}
+              className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.resources.sparse_paths_hint)}
+            </p>
+          </div>
+        )}
         {error && <InlineError message={error} />}
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            onClick={() => void save(draftMode, sparseDraft)}
+            disabled={saving}
+          >
+            {t(($) => $.resources.ref_save)}
+          </Button>
+        </div>
       </PopoverContent>
     </Popover>
   );
@@ -930,6 +1177,7 @@ type PendingFolder = {
   path: string;
   label: string;
   mode: LocalDirectoryExecutionMode;
+  sparsePaths: string;
   /** undefined = unknown (older desktop build); treated as "cannot verify". */
   isGitRepo: boolean | undefined;
 };
@@ -945,18 +1193,21 @@ function LocalFolderSlot({
   projectId,
   daemonStatus,
   runtimes,
+  desktopMode,
   serverValidatesWorktree,
 }: {
   wsId: string;
   projectId: string;
   daemonStatus: LocalDaemonStatus;
   runtimes: AgentRuntime[];
+  desktopMode: boolean;
   serverValidatesWorktree: boolean;
 }) {
   const { t } = useT("projects");
   const createResource = useCreateProjectResource(wsId, projectId);
   const [picking, setPicking] = useState(false);
   const [pending, setPending] = useState<PendingFolder | null>(null);
+  const [manualLocalPath, setManualLocalPath] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const daemonId = daemonStatus.daemonId;
@@ -1003,6 +1254,7 @@ function LocalFolderSlot({
             ? "worktree"
             : "in_place",
         isGitRepo: validation.is_git_repo,
+        sparsePaths: "",
       });
     } catch (err) {
       toast.error(errorMessage(err, t(($) => $.resources.toast_local_pick_failed)));
@@ -1011,10 +1263,39 @@ function LocalFolderSlot({
     }
   };
 
+  const addManual = () => {
+    const path = manualLocalPath.trim();
+    if (!path || saving) return;
+    if (!ready || !daemonId) {
+      toast.error(t(($) => $.resources.local_daemon_offline_hint));
+      return;
+    }
+    if (!isAbsolutePathLike(path)) {
+      toast.error(t(($) => $.resources.local_validate_not_absolute));
+      return;
+    }
+    setError(null);
+    setPending({
+      path,
+      label: lastPathPart(path),
+      mode:
+        serverValidatesWorktree &&
+        runtimeAdvertisesLocalWorktree(runtimes, daemonId)
+          ? "worktree"
+          : "in_place",
+      // A browser cannot inspect this path. The server and daemon validate it
+      // when the resource is saved or claimed, so worktree remains selectable.
+      isGitRepo: undefined,
+      sparsePaths: "",
+    });
+  };
+
   const add = async () => {
     if (!pending || !daemonId || saving) return;
     setSaving(true);
     setError(null);
+    const sparsePaths =
+      pending.mode === "worktree" ? parseSparsePathsText(pending.sparsePaths) : [];
     try {
       await createResource.mutateAsync({
         resource_type: "local_directory",
@@ -1023,6 +1304,7 @@ function LocalFolderSlot({
           daemon_id: daemonId,
           label: pending.label,
           execution_mode: pending.mode,
+          ...(sparsePaths.length > 0 ? { sparse_paths: sparsePaths } : {}),
         },
       });
       toast.success(t(($) => $.resources.toast_local_attached));
@@ -1056,6 +1338,29 @@ function LocalFolderSlot({
             serverValidatesWorktree,
           )}
         />
+        {pending.mode === "worktree" && (
+          <div className="space-y-1.5">
+            <label
+              className="text-caption font-medium"
+              htmlFor="pending-local-directory-sparse-paths"
+            >
+              {t(($) => $.resources.sparse_paths_label)}
+            </label>
+            <textarea
+              id="pending-local-directory-sparse-paths"
+              value={pending.sparsePaths}
+              onChange={(event) =>
+                setPending({ ...pending, sparsePaths: event.target.value })
+              }
+              placeholder={t(($) => $.resources.sparse_paths_placeholder)}
+              rows={3}
+              className="w-full rounded-md border bg-transparent px-2 py-1.5 font-mono text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.resources.sparse_paths_hint)}
+            </p>
+          </div>
+        )}
         {error && <InlineError message={error} />}
         <div className="flex justify-end gap-1.5">
           <Button
@@ -1081,16 +1386,26 @@ function LocalFolderSlot({
           ? t(($) => $.resources.local_slot_description)
           : t(($) => $.resources.local_daemon_offline_hint)}
       </p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-7 text-caption"
-        disabled={!ready || picking}
-        onClick={() => void pick()}
-      >
-        <FolderOpen className="size-3" />
-        {t(($) => $.resources.local_pick)}
-      </Button>
+      {desktopMode && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-caption"
+          disabled={!ready || picking}
+          onClick={() => void pick()}
+        >
+          <FolderOpen className="size-3" />
+          {t(($) => $.resources.local_pick)}
+        </Button>
+      )}
+      {ready && (
+        <ManualLocalDirectoryForm
+          value={manualLocalPath}
+          onChange={setManualLocalPath}
+          onSubmit={addManual}
+          disabled={createResource.isPending}
+        />
+      )}
     </div>
   );
 }
@@ -1128,6 +1443,84 @@ function worktreeUnavailableReason(
   if (isGitRepo === false) return "not_git";
   if (!serverValidates) return "server_outdated";
   return undefined;
+}
+
+function ManualLocalDirectoryForm({
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  disabled?: boolean;
+}) {
+  const { t } = useT("projects");
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit();
+      }}
+      className="space-y-1 border-t pt-2"
+    >
+      <label
+        className="text-micro font-medium text-muted-foreground"
+        htmlFor="manual-local-directory-path"
+      >
+        {t(($) => $.resources.manual_local_path_label)}
+      </label>
+      <div className="flex items-center gap-1.5">
+        <input
+          id="manual-local-directory-path"
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={t(($) => $.resources.manual_local_path_placeholder)}
+          className="min-w-0 flex-1 rounded-md border bg-transparent px-2 py-1 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-caption"
+          disabled={disabled || !value.trim()}
+        >
+          {t(($) => $.resources.mode_add)}
+        </Button>
+      </div>
+      <p className="text-micro text-muted-foreground">
+        {t(($) => $.resources.manual_local_path_hint)}
+      </p>
+    </form>
+  );
+}
+
+function parseSparsePathsText(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\n,]+/)) {
+    const path = raw.trim().replace(/^\/+|\/+$/g, "");
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    out.push(path);
+  }
+  return out;
+}
+
+function sameStringArray(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+function isAbsolutePathLike(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+function lastPathPart(path: string): string {
+  const normalized = path.replace(/[\\/]+$/g, "");
+  const parts = normalized.split(/[\\/]+/);
+  return parts[parts.length - 1] || path;
 }
 
 function localValidationMessage(

@@ -48,6 +48,7 @@ import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { PrivateProjectsSection } from "./private-projects-section";
+import { StorageMigrationSection } from "./storage-migration-section";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -481,6 +482,13 @@ export function WorkspaceTab() {
       </SettingsSection>
 
       {membersFetched && isOwner ? <PrivateProjectsSection /> : null}
+
+      {/* Local→object-store migration (self-hosted cutover). Owner/admin
+          only — the endpoint gates on the same role — and hidden until the
+          member query settles so it can't flash before the role is known. */}
+      {membersFetched && canManageWorkspace ? (
+        <StorageMigrationSection wsId={workspace.id} />
+      ) : null}
 
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in

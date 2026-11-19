@@ -13,11 +13,13 @@ export type RuntimeConfigResult =
   | { ok: true; config: RuntimeConfig }
   | { ok: false; error: RuntimeConfigError };
 
+// Used when ~/.multica/desktop.json is missing: installs without any local
+// config connect to the self-hosted deployment instead of a hosted cloud.
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
-  apiUrl: "https://api.multica.ai",
-  wsUrl: "wss://api.multica.ai/ws",
-  appUrl: "https://multica.ai",
+  apiUrl: "https://multica.wnbgj.com",
+  wsUrl: "wss://multica.wnbgj.com/ws",
+  appUrl: "https://multica.wnbgj.com",
 });
 
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({

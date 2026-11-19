@@ -22,6 +22,10 @@ export const workspaceKeys = {
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  systemFallbackRuntime: (wsId: string) =>
+    ["workspaces", wsId, "system-fallback-runtime"] as const,
+  storageMigration: (wsId: string) =>
+    ["workspaces", wsId, "storage-migration"] as const,
 };
 
 export function workspaceListOptions() {
@@ -43,6 +47,33 @@ export function memberListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.members(wsId),
     queryFn: () => api.listMembers(wsId),
+  });
+}
+
+/**
+ * The instance-wide last-resort runtime (system_config.settings.
+ * fallback_runtime). Scoped under the workspace key tree because the endpoint
+ * resolves through X-Workspace-ID, so switching workspaces drops the cache
+ * instead of leaving a stale editor value behind.
+ */
+export function systemFallbackRuntimeOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.systemFallbackRuntime(wsId),
+    queryFn: () => api.getSystemFallbackRuntime(),
+  });
+}
+
+/**
+ * Local→object-store storage migration status (owner/admin only — a member's
+ * request 403s, so callers gate `enabled` on the role). Polls only while a
+ * run is in flight; status is otherwise static.
+ */
+export function storageMigrationOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.storageMigration(wsId),
+    queryFn: () => api.getStorageMigrationStatus(),
+    refetchInterval: (query) =>
+      query.state.data?.state?.running ? 1000 : false,
   });
 }
 

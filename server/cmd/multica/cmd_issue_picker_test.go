@@ -4,14 +4,90 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 func TestIssueCreateRegistersAssigneePickerFlag(t *testing.T) {
 	flag := issueCreateCmd.Flags().Lookup("assignee-picker")
 	if flag == nil || flag.Value.Type() != "bool" {
 		t.Fatal("issue create must expose the boolean --assignee-picker flag")
+	}
+}
+
+func TestRunIssueCreateUsesCurrentTaskQuickCreateOrigin(t *testing.T) {
+	const (
+		currentTaskID = "01a1cfc6-1917-7b2e-9580-f10f0d0b0ddb"
+		staleTaskID   = "01a1cf92-43fb-720f-b7ec-95e35aa8b263"
+	)
+	for _, tc := range []struct {
+		name              string
+		quickCreateTaskID string
+		wantOrigin        bool
+	}{
+		{name: "ordinary task ignores stale quick-create environment"},
+		{name: "quick-create task uses its current origin", quickCreateTaskID: currentTaskID, wantOrigin: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workDir := t.TempDir()
+			credPath := filepath.Join(workDir, execenv.TaskCredentialsRelPath)
+			if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			payload := `{"managed_by":"` + execenv.TaskCredentialsManagedBy + `",` +
+				`"token":"mat_current","task_id":"` + currentTaskID + `",` +
+				`"workspace_id":"ws-current","agent_id":"agent-current",` +
+				`"quick_create_task_id":"` + tc.quickCreateTaskID + `"}`
+			if err := os.WriteFile(credPath, []byte(payload), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(workDir)
+
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/issues" || r.Method != http.MethodPost {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+					return
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode create body: %v", err)
+				}
+				w.WriteHeader(http.StatusCreated)
+				json.NewEncoder(w).Encode(map[string]any{"id": "created-issue", "title": "Origin regression"})
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_TOKEN", "mat_stale")
+			t.Setenv("MULTICA_TASK_ID", staleTaskID)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-stale")
+			t.Setenv("MULTICA_AGENT_ID", "agent-stale")
+			t.Setenv("MULTICA_QUICK_CREATE_TASK_ID", staleTaskID)
+
+			cmd := newIssueCreateTestCmd()
+			if err := cmd.ParseFlags([]string{"--title", "Origin regression"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := runIssueCreate(cmd, nil); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.wantOrigin {
+				if origin, ok := body["origin_type"]; ok {
+					t.Fatalf("ordinary create carried stale origin_type %v; body=%v", origin, body)
+				}
+				if origin, ok := body["origin_id"]; ok {
+					t.Fatalf("ordinary create carried stale origin_id %v; body=%v", origin, body)
+				}
+				return
+			}
+			if body["origin_type"] != "quick_create" || body["origin_id"] != currentTaskID {
+				t.Fatalf("quick-create origin = (%v,%v), want (quick_create,%s)", body["origin_type"], body["origin_id"], currentTaskID)
+			}
+		})
 	}
 }
 

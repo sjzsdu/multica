@@ -204,6 +204,8 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
+  workflowRunsAll: () => ["issues", "workflow-runs"] as const,
+  workflowRuns: (issueId: string) => [...issueKeys.workflowRunsAll(), issueId] as const,
   /** Prefix for reconnects and task events without an issue scope. */
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
@@ -766,3 +768,9 @@ export function issueAttachmentsOptions(issueId: string) {
   });
 }
 
+export function issueWorkflowRunsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.workflowRuns(issueId),
+    queryFn: () => api.listIssueWorkflowRuns(issueId),
+  });
+}

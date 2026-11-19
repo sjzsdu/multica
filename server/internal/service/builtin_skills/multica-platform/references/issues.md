@@ -46,10 +46,13 @@ reported issue ID with `issue update`; do not retry `issue create`.
 
 When an issue run changes code in a checked-out GitHub repo, the default handoff
 is to open or update a PR before posting the final Multica issue comment, unless
-the user explicitly asked for a local-only change or no PR. This is a default, not
-an unconditional command: if no code changed, say no PR is needed; if PR creation
-is blocked by auth, failing tests, or missing remote state, report that blocker
-instead of pretending the run is complete.
+the user explicitly asked for a local-only change or no PR. A project that exposes
+a `local_directory` but no `github_repo` is always local-only: do not infer a
+workspace remote, push, create/update a PR, or merge remote work for it. Ask the
+user to attach the intended GitHub repository before remote delivery. This is a default, not
+an unconditional command: if no code changed, say no PR is needed;
+if PR creation is blocked by auth, failing tests, or missing remote state, report
+that blocker instead of pretending the run is complete.
 
 To make the PR show on the issue, put a routable issue key in the PR **title**
 (preferred) or the **branch**. A key that appears only as a bare mention in the
