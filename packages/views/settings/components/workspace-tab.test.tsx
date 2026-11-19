@@ -88,6 +88,10 @@ vi.mock("./private-projects-section", () => ({
   PrivateProjectsSection: () => <div data-testid="private-projects" />,
 }));
 
+vi.mock("./storage-migration-section", () => ({
+  StorageMigrationSection: () => null,
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));

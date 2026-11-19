@@ -6,7 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { renderWithI18n } from "../../test/i18n";
+import en from "../../locales/en/projects.json";
 
+const strings = en.resources;
 const updateMock = vi.fn().mockResolvedValue({});
 const createMock = vi.fn().mockResolvedValue({});
 const deleteHookMock = vi.fn();
@@ -254,6 +256,78 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     expect(createMock.mock.calls[0]?.[0]).toEqual({
       resource_type: "github_repo",
       resource_ref: { url: "https://github.com/multica-ai/other", ref: "main" },
+    });
+  });
+
+  it("applies an SSH host alias and stores the GitHub CLI account with the ref", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
+      target: { value: "https://github.com/multica-ai/other" },
+    });
+    fireEvent.change(screen.getByLabelText(/starting branch/i), {
+      target: { value: "main" },
+    });
+    fireEvent.change(screen.getByLabelText(strings.ssh_alias_label), {
+      target: { value: "github-work" },
+    });
+    fireEvent.change(screen.getByLabelText(strings.gh_account_label), {
+      target: { value: "work-account" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^add multica-ai\//i }));
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: {
+        url: "git@github-work:multica-ai/other",
+        ref: "main",
+        gh_account: "work-account",
+      },
+    });
+  });
+
+  it("does not attach a non-GitHub URL when an SSH host alias was requested", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const address = "git@git.example.com:multica-ai/other.git";
+    fireEvent.change(screen.getByLabelText(/paste a github url/i), {
+      target: { value: address },
+    });
+    fireEvent.change(screen.getByLabelText(strings.ssh_alias_label), {
+      target: { value: "github-work" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: `Add ${address}` }));
+
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("updates repository connection settings without dropping the checkout ref", async () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: strings.github_edit_tooltip })[0]!,
+    );
+    fireEvent.change(screen.getByLabelText(strings.github_remote_url_label), {
+      target: { value: "git@github-work:multica-ai/multica.git" },
+    });
+    fireEvent.change(screen.getByLabelText(strings.gh_account_label), {
+      target: { value: "work-account" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(updateMock).toHaveBeenCalledTimes(1));
+    expect(updateMock.mock.calls[0]?.[0]).toEqual({
+      resourceId: "res-1",
+      data: {
+        resource_ref: {
+          url: "git@github-work:multica-ai/multica.git",
+          ref: "release/2026-09",
+          gh_account: "work-account",
+        },
+      },
     });
   });
 

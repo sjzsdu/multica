@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Multica 当前项目架构",
+    "output": "multica-architecture.html",
+    "quality_profile": "showcase",
+    "viewBox": [1220, 680],
+    "repository": {
+      "url": "https://github.com/multica-ai/multica.git",
+      "revision": "2d944b44a1c19a0ecc8098bdd7339123ca1c0015"
+    },
+    "views": [
+      {
+        "id": "runtime-path",
+        "label": "主运行时路径",
+        "focus": ["web-app", "desktop-app", "shared-core", "api-server", "postgres"],
+        "note": "从客户端经过共享 TypeScript 层进入 Go API，并落到 PostgreSQL。"
+      },
+      {
+        "id": "shared-boundaries",
+        "label": "共享包依赖",
+        "focus": ["web-app", "desktop-app", "shared-views", "shared-core", "shared-ui"],
+        "note": "Web 与 Desktop 复用 views、core、ui；平台路由留在应用层。"
+      },
+      {
+        "id": "realtime-agents",
+        "label": "实时与 Agent",
+        "focus": ["api-server", "realtime-redis", "daemon", "shared-core", "mobile-app"],
+        "note": "WebSocket 事件进入客户端缓存，Daemon 负责运行时任务执行回调。"
+      },
+      {
+        "id": "self-hosting",
+        "label": "自托管部署",
+        "focus": ["api-server", "postgres", "realtime-redis", "web-app", "docs-site"],
+        "note": "Docker Compose 与 Helm 均提供 frontend、backend、PostgreSQL 的部署路径。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "web-app",
+      "type": "frontend",
+      "label": "Web 应用",
+      "sublabel": "Next.js App Router",
+      "tag": "apps/web",
+      "pos": [40, 40],
+      "size": [170, 72],
+      "sources": [
+        { "path": "apps/web/package.json", "line": 1, "label": "应用包定义" },
+        { "path": "CLAUDE.md", "line": 15, "label": "项目结构" }
+      ]
+    },
+    {
+      "id": "desktop-app",
+      "type": "frontend",
+      "label": "Desktop 应用",
+      "sublabel": "Electron + React Router",
+      "tag": "apps/desktop",
+      "pos": [250, 40],
+      "size": [170, 72],
+      "sources": [
+        { "path": "apps/desktop/package.json", "line": 1, "label": "应用包定义" },
+        { "path": "apps/desktop/src/renderer/src/routes.tsx", "line": 1, "label": "桌面路由" }
+      ]
+    },
+    {
+      "id": "mobile-app",
+      "type": "frontend",
+      "label": "Mobile 应用",
+      "sublabel": "Expo + React Native",
+      "tag": "apps/mobile",
+      "pos": [460, 40],
+      "size": [170, 72],
+      "sources": [
+        { "path": "apps/mobile/package.json", "line": 1, "label": "应用包定义" },
+        { "path": "apps/mobile/CLAUDE.md", "line": 1, "label": "移动端边界" }
+      ]
+    },
+    {
+      "id": "docs-site",
+      "type": "frontend",
+      "label": "文档站",
+      "sublabel": "Fumadocs + Next.js",
+      "tag": "apps/docs",
+      "pos": [850, 40],
+      "size": [170, 72],
+      "sources": [
+        { "path": "apps/docs/package.json", "line": 1, "label": "文档包定义" },
+        { "path": "CLAUDE.md", "line": 17, "label": "项目结构" }
+      ]
+    },
+    {
+      "id": "shared-views",
+      "type": "frontend",
+      "label": "业务视图层",
+      "sublabel": "共享页面与业务组件",
+      "tag": "packages/views",
+      "pos": [120, 160],
+      "size": [190, 78],
+      "sources": [
+        { "path": "packages/views/package.json", "line": 1, "label": "共享视图包" },
+        { "path": "CLAUDE.md", "line": 17, "label": "项目结构" }
+      ]
+    },
+    {
+      "id": "shared-core",
+      "type": "backend",
+      "label": "Headless 核心层",
+      "sublabel": "API client · Query · Zustand",
+      "tag": "packages/core",
+      "pos": [380, 160],
+      "size": [210, 78],
+      "sources": [
+        { "path": "packages/core/package.json", "line": 1, "label": "核心包定义" },
+        { "path": "packages/core/realtime/provider.tsx", "line": 118, "label": "实时同步" },
+        { "path": "packages/core/api/ws-client.ts", "line": 35, "label": "WebSocket 客户端" }
+      ]
+    },
+    {
+      "id": "shared-ui",
+      "type": "frontend",
+      "label": "原子 UI 层",
+      "sublabel": "shadcn / Base UI primitives",
+      "tag": "packages/ui",
+      "pos": [670, 160],
+      "size": [190, 78],
+      "sources": [
+        { "path": "packages/ui/package.json", "line": 1, "label": "UI 包定义" },
+        { "path": "CLAUDE.md", "line": 31, "label": "包边界" }
+      ]
+    },
+    {
+      "id": "api-server",
+      "type": "backend",
+      "label": "Go API 服务",
+      "sublabel": "Chi router · handlers · services",
+      "tag": "server/cmd/server",
+      "pos": [310, 300],
+      "size": [220, 86],
+      "sources": [
+        { "path": "server/cmd/server/router.go", "line": 1304, "label": "HTTP / WS 路由" },
+        { "path": "server/cmd/server/router.go", "line": 1559, "label": "业务 API" },
+        { "path": "server/cmd/server/main.go", "line": 1, "label": "服务入口" }
+      ]
+    },
+    {
+      "id": "daemon",
+      "type": "external",
+      "label": "Agent Daemon",
+      "sublabel": "运行时执行与任务回调",
+      "tag": "server/internal/daemon",
+      "pos": [50, 450],
+      "size": [205, 78],
+      "sources": [
+        { "path": "server/cmd/server/router.go", "line": 1426, "label": "Daemon API" },
+        { "path": "CLAUDE.md", "line": 16, "label": "服务端结构" }
+      ]
+    },
+    {
+      "id": "realtime-redis",
+      "type": "database",
+      "label": "实时与队列基础设施",
+      "sublabel": "Redis relay · task queues",
+      "tag": "可选，多节点需要",
+      "pos": [590, 450],
+      "size": [220, 86],
+      "sources": [
+        { "path": "server/cmd/server/main.go", "line": 31, "label": "Redis 客户端" },
+        { "path": "server/internal/realtime/hub.go", "line": 1, "label": "WebSocket Hub" }
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "pgx + sqlc generated queries",
+      "tag": "主数据存储",
+      "pos": [870, 300],
+      "size": [190, 86],
+      "sources": [
+        { "path": "server/pkg/db/queries/issue.sql", "line": 1, "label": "领域查询" },
+        { "path": "server/pkg/db/generated/issue.sql.go", "line": 1, "label": "sqlc 生成代码" },
+        { "path": "docker-compose.yml", "line": 1, "label": "本地部署" }
+      ]
+    },
+    {
+      "id": "integrations",
+      "type": "external",
+      "label": "外部集成",
+      "sublabel": "GitHub · Slack · Lark · WeCom · LLM",
+      "tag": "OAuth / webhook / channel",
+      "pos": [830, 540],
+      "size": [230, 78],
+      "sources": [
+        { "path": "server/cmd/server/router.go", "line": 1393, "label": "Webhook 路由" },
+        { "path": "server/cmd/server/router.go", "line": 1767, "label": "集成路由" }
+      ]
+    }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "客户端应用与文档", "wraps": ["web-app", "desktop-app", "mobile-app", "docs-site"] },
+    { "kind": "region", "label": "共享 TypeScript 包", "wraps": ["shared-views", "shared-core", "shared-ui"] },
+    { "kind": "security-group", "label": "服务端运行时", "wraps": ["api-server", "daemon", "integrations"] },
+    { "kind": "security-group", "label": "有状态基础设施", "wraps": ["realtime-redis", "postgres"] }
+  ],
+  "connections": [
+    { "id": "web-views", "from": "web-app", "to": "shared-views", "label": "页面复用", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "id": "desktop-views", "from": "desktop-app", "to": "shared-views", "label": "业务视图复用", "variant": "emphasis", "fromSide": "bottom", "toSide": "right", "via": [[335, 135], [355, 135], [355, 199]] },
+    { "id": "mobile-core", "from": "mobile-app", "to": "shared-core", "label": "类型与纯函数", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "via": [[545, 135], [485, 135]] },
+    { "id": "views-core", "from": "shared-views", "to": "shared-core", "label": "queries / mutations / stores", "labelAt": [345, 252] },
+    { "id": "core-api", "from": "shared-core", "to": "api-server", "label": "HTTP API + WebSocket", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "via": [[485, 280], [420, 280]] },
+    { "id": "api-db", "from": "api-server", "to": "postgres", "label": "事务读写 · sqlc" },
+    { "id": "api-redis", "from": "api-server", "to": "realtime-redis", "label": "实时广播 / 队列", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "via": [[420, 415], [700, 415]], "labelAt": [560, 415] },
+    { "id": "daemon-api", "from": "daemon", "to": "api-server", "label": "claim · progress · result", "fromSide": "right", "toSide": "left", "via": [[280, 489], [280, 343]] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "包依赖与复用",
+      "items": [
+        "views -> core + ui；core、ui 独立",
+        "Web / Desktop 共享 views、core、ui",
+        "Mobile 仅复用 core 类型与纯函数"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态与实时性",
+      "items": [
+        "React Query 管服务端状态；Zustand 管客户端状态",
+        "WebSocket 事件更新 Query cache",
+        "断线重连使用指数退避"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "部署形态",
+      "items": [
+        "Compose / Helm 均部署 frontend、backend、PostgreSQL",
+        "Helm 可切换外部 PostgreSQL",
+        "Redis relay 支撑多节点实时与任务共享"
+      ]
+    }
+  ]
+}

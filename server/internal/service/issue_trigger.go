@@ -209,12 +209,12 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return declineRun(dispatch.ReasonTargetUnavailable)
 		}
-		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
+		resolved, err := ResolveRuntimeWithFallback(ctx, s.runtimeLookup(s.Queries), leader)
 		if err != nil {
 			return declineRun(dispatch.ReasonInternalError)
 		}
-		if !verdict.Ready() {
-			return declineRun(verdict.Reason)
+		if !resolved.Verdict.Ready() {
+			return declineRun(resolved.Verdict.Reason)
 		}
 		if !canAccess(leader) {
 			return declineRun(dispatch.ReasonInvocationNotAllowed)

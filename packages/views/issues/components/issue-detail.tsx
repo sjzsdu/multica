@@ -124,6 +124,7 @@ import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
+import { WorkflowPanel } from "./workflow-panel";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
@@ -3568,7 +3569,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     // Apps the issue's runs used. Hidden until one makes a call.
     apps: <IssueAppsSection issueId={id} />,
     // Execution summary owns its query, realtime updates and disclosure.
-    execution_log: <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />,
+    execution_log: (
+      <>
+        <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />
+        <WorkflowPanel issueId={id} />
+      </>
+    ),
     // Details — creator and timestamps. Defaults to below the execution
     // log because it is the least-read block in the sidebar: the values
     // never change once the issue exists, while the log above it is

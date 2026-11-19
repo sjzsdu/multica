@@ -48,6 +48,7 @@ export function RuntimePicker({
   canEdit = true,
   variant = "chip",
   showLabel = true,
+  renderTrigger,
   onChange,
 }: {
   value: string;
@@ -58,6 +59,15 @@ export function RuntimePicker({
   canEdit?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
+  /**
+   * Full custom trigger (markup AND content) for surfaces where the chip
+   * look would clobber an established display — e.g. the agents list cell,
+   * which keeps its provider-logo + label rendering. The picker computes
+   * the accessible title (label, machine, online state) and hands it over
+   * as `{ title }`; popover behaviour, two-level navigation, and the
+   * selection logic stay here. Ignored when `canEdit` is false.
+   */
+  renderTrigger?: (context: { title: string }) => React.ReactElement;
   onChange: (runtimeId: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -247,72 +257,78 @@ export function RuntimePicker({
       align="start"
       tooltip={triggerTitle}
       triggerRender={
-        <button
-          type="button"
-          className={
-            variant === "field"
-              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
-              : CHIP_CLASS
-          }
-          aria-label={triggerTitle}
-        />
+        renderTrigger ? (
+          renderTrigger({ title: triggerTitle })
+        ) : (
+          <button
+            type="button"
+            className={
+              variant === "field"
+                ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+                : CHIP_CLASS
+            }
+            aria-label={triggerTitle}
+          />
+        )
       }
       trigger={
-        <>
-          {selected ? (
-            <ProviderLogo
-              provider={selected.provider}
-              className={
-                variant === "field" ? "h-4 w-4 shrink-0" : "h-3 w-3 shrink-0"
-              }
-            />
-          ) : (
-            <Monitor
-              className={
-                variant === "field"
-                  ? "h-4 w-4 shrink-0 text-muted-foreground"
-                  : "h-3 w-3 shrink-0 text-muted-foreground"
-              }
-              aria-hidden="true"
-            />
-          )}
-          {variant === "field" && selected ? (
-            <span className="min-w-0 flex-1 truncate">
-              {selectedLabel}
-              {selectedMachine && selectedMachine.title !== selectedLabel && (
-                <span className="text-muted-foreground">
-                  {" · "}
-                  {selectedMachine.title}
-                </span>
-              )}
-            </span>
-          ) : (
-            <span
-              className={
-                variant === "field"
-                  ? "min-w-0 flex-1 truncate"
-                  : "min-w-0 truncate font-mono"
-              }
-            >
-              {combinedLabel}
-            </span>
-          )}
-          {selected && (
-            <span
-              className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-                isOnline ? "bg-success" : "bg-muted-foreground/40"
-              }`}
-            />
-          )}
-          {variant === "field" ? (
-            <ChevronDown
-              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
-                open ? "rotate-180" : ""
-              }`}
-              aria-hidden="true"
-            />
-          ) : null}
-        </>
+        renderTrigger ? null : (
+          <>
+            {selected ? (
+              <ProviderLogo
+                provider={selected.provider}
+                className={
+                  variant === "field" ? "h-4 w-4 shrink-0" : "h-3 w-3 shrink-0"
+                }
+              />
+            ) : (
+              <Monitor
+                className={
+                  variant === "field"
+                    ? "h-4 w-4 shrink-0 text-muted-foreground"
+                    : "h-3 w-3 shrink-0 text-muted-foreground"
+                }
+                aria-hidden="true"
+              />
+            )}
+            {variant === "field" && selected ? (
+              <span className="min-w-0 flex-1 truncate">
+                {selectedLabel}
+                {selectedMachine && selectedMachine.title !== selectedLabel && (
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    {selectedMachine.title}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span
+                className={
+                  variant === "field"
+                    ? "min-w-0 flex-1 truncate"
+                    : "min-w-0 truncate font-mono"
+                }
+              >
+                {combinedLabel}
+              </span>
+            )}
+            {selected && (
+              <span
+                className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
+                  isOnline ? "bg-success" : "bg-muted-foreground/40"
+                }`}
+              />
+            )}
+            {variant === "field" ? (
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                  open ? "rotate-180" : ""
+                }`}
+                aria-hidden="true"
+              />
+            ) : null}
+          </>
+        )
       }
       header={
         drilled ? (

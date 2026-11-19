@@ -1838,7 +1838,11 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	// locates the issue deterministically by origin instead of "most
 	// recent issue by this agent", which is racy when max_concurrent_tasks
 	// > 1 and the agent is creating other issues in parallel.
-	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
+	taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID")
+	if cred, _, ok := resolveDaemonIdentity(); ok {
+		taskID = cred.QuickCreateTaskID
+	}
+	if taskID != "" {
 		body["origin_type"] = "quick_create"
 		body["origin_id"] = taskID
 	}

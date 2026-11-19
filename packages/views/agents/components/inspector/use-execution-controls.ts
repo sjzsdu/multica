@@ -75,16 +75,30 @@ export function useExecutionControls({
 
   // Model, thinking level, and service tier are runtime/model native. Clear
   // them together so the new runtime resolves its own defaults instead of
-  // inheriting incompatible tokens.
+  // inheriting incompatible tokens. The write validator rejects a chain entry
+  // naming the new primary, so strip it in the same request — switching to a
+  // runtime that was previously a fallback never 400s; the remaining chain
+  // still applies.
   const changeRuntime = useCallback(
-    (runtimeId: string) =>
-      update({
+    (runtimeId: string) => {
+      // Switching runtimes invalidates runtime-native model settings, and any
+      // fallback entry pointing at the NEW runtime (it would shadow the
+      // primary). Omit the key entirely for agents without fallbacks so the
+      // PATCH stays identical to the pre-fallback shape.
+      const remainingFallbacks = (agent.fallback_runtimes ?? []).filter(
+        (entry) => entry.runtime_id !== runtimeId,
+      );
+      return update({
         runtime_id: runtimeId,
         model: "",
         thinking_level: "",
         service_tier: "",
-      }),
-    [update],
+        ...(agent.fallback_runtimes?.length
+          ? { fallback_runtimes: remainingFallbacks }
+          : {}),
+      });
+    },
+    [agent.fallback_runtimes, update],
   );
 
   return {

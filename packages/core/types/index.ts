@@ -3,6 +3,12 @@ export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssign
   IssueUnread,
 } from "./issue";
 export type {
+  StorageMigrationFailure,
+  StorageMigrationPending,
+  StorageMigrationState,
+  StorageMigrationStatus,
+} from "./storage-migration";
+export type {
   IssueStatusCategory,
   IssueStatusEntry,
   IssueStatusIcon,
@@ -30,6 +36,7 @@ export type {
 } from "./issue-workflow";
 export type {
   Agent,
+  AgentFallbackRuntimeEntry,
   AgentConversationStarter,
   AgentStatus,
   AgentRuntimeMode,
@@ -119,6 +126,7 @@ export type {
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
+  SystemFallbackRuntime,
   MikaBootstrapResponse,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";
@@ -387,6 +395,13 @@ export type {
   SquadActiveIssueBrief,
   SquadMemberStatus,
   SquadMemberStatusListResponse,
+  SquadWorkflowMode,
+  SquadWorkflowCompletionSignal,
+  SquadWorkflowMergeMode,
+  SquadWorkflowPolicy,
+  SquadWorkflowGate,
+  SquadWorkflowApproval,
+  SquadWorkflowRun,
 } from "./squad";
 export type {
   BillingBalance,

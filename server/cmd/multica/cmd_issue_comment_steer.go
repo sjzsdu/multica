@@ -34,7 +34,9 @@ func resolveSteerTargets(ctx context.Context, client *cli.APIClient, issueID str
 	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/task-runs", &runs); err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
-	selfTask, selfAgent := os.Getenv("MULTICA_TASK_ID"), os.Getenv("MULTICA_AGENT_ID")
+	// The client carries this run's identity, which newAPIClient prefers from
+	// the task credential file over a possibly frozen environment.
+	selfTask, selfAgent := client.TaskID, client.AgentID
 	isSelf := func(run map[string]any) bool {
 		return (selfTask != "" && strVal(run, "id") == selfTask) || (selfAgent != "" && strVal(run, "agent_id") == selfAgent)
 	}

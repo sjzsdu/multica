@@ -381,6 +381,12 @@ export function useSettingsSearchIndex(
         title: t(($) => $.page.tabs.mcp),
         description: t(($) => $.mcp.description),
       },
+      {
+        tab: "fallback-runtime",
+        anchor: "runtime",
+        title: t(($) => $.fallback_runtime.title),
+        description: t(($) => $.fallback_runtime.description),
+      },
     ];
     // Rows without an anchor describe a whole page: fold their copy into the
     // page entry so each page is indexed once, with its description.

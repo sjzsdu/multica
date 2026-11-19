@@ -538,6 +538,16 @@
       "start_date": "開始日期"
     }
   },
+  "fallback_runtime": {
+    "title": "執行階段備援",
+    "description": "當代理程式的主要執行階段與其自身的備援鏈都無法執行時，所有工作區都會退回到此處的執行階段。",
+    "empty": "尚未設定全域備援執行階段。",
+    "hint": "執行階段取自目前工作區；未選擇模型時使用該執行階段的預設模型。",
+    "admin_only": "只有工作區擁有者與管理員可以修改。",
+    "saved": "全域備援執行階段已更新。",
+    "save_error": "全域備援執行階段儲存失敗。",
+    "load_error": "無法載入全域備援執行階段。"
+  },
   "mcp": {
     "description": "新增後需在 AI 代理的 MCP 頁面分配。",
     "servers_title": "共享 MCP Server",
@@ -589,6 +599,7 @@
       "quick_actions": "快捷操作",
       "plugins": "外掛",
       "mcp": "MCP 伺服器",
+      "fallback_runtime": "執行階段備援",
       "billing": "帳單與套餐",
       "code": "程式碼",
       "channels": "訊息渠道",
@@ -954,6 +965,13 @@
     "usage_help": "使用方法"
   },
   "workspace": {
+    "storage_section": "儲存",
+    "storage_migration_label": "本地檔案遷移",
+    "storage_migration_pending": "還有 {{attachments}} 個附件和 {{avatars}} 個頭像儲存在伺服器本地磁碟上。",
+    "storage_migration_running": "正在遷移到物件儲存……已遷移 {{migrated}} 個，失敗 {{failed}} 個。",
+    "storage_migration_finished": "已將 {{migrated}} 個檔案遷移到物件儲存，失敗 {{failed}} 個。",
+    "storage_migration_start": "遷移檔案",
+    "storage_migration_start_failed": "啟動儲存遷移失敗。",
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",

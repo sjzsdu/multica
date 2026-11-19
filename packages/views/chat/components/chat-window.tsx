@@ -46,6 +46,7 @@ import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { shouldReconcilePendingTaskTransition } from "./pending-task-recovery";
 import { useChatInputFocus } from "./use-chat-input-focus";
 import { useChatOpenReveal } from "./use-chat-open-reveal";
 import { ChatWindowMessages } from "./chat-window-messages";
@@ -94,6 +95,36 @@ export function ChatWindow() {
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
   const wakeups = useChatWakeups(activeSessionId);
+  const qc = useQueryClient();
+  const previousPendingRef = useRef<{
+    sessionId: string;
+    taskId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!activeSessionId) {
+      previousPendingRef.current = null;
+      return;
+    }
+
+    const previous = previousPendingRef.current;
+    previousPendingRef.current = {
+      sessionId: activeSessionId,
+      taskId: pendingTaskId,
+    };
+    if (!shouldReconcilePendingTaskTransition(previous, {
+      sessionId: activeSessionId,
+      taskId: pendingTaskId,
+    })) {
+      return;
+    }
+
+    // The pending query has a polling fallback for lifecycle frames missed by
+    // realtime. When that fallback observes completion (or queue promotion),
+    // reconcile the transcript too so the assistant result appears in the same
+    // recovery path instead of merely clearing the spinner.
+    qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
+    qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
+  }, [activeSessionId, pendingTaskId, qc]);
 
   // The window adds its own focus moments — opening it, and Ask Multica starting
   // a new chat — on top of the controller's new-chat nonce. Both counters only
