@@ -24,6 +24,11 @@ func isTerminal(f *os.File) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
+// fileTimeFormat keeps the date on every line. Server logs are timestamped by
+// the container runtime, but the daemon writes its own rotated file, where a
+// bare HH:MM:SS cannot be correlated across days during incident forensics.
+const fileTimeFormat = "2006-01-02T15:04:05.000Z07:00"
+
 // Init initializes the global slog logger. Colors are enabled when stderr
 // is a terminal and disabled otherwise. Reads LOG_LEVEL env var (debug,
 // info, warn, error). Default: debug.
@@ -44,7 +49,7 @@ func NewLogger(component string) *slog.Logger {
 	level := parseLevel(os.Getenv("LOG_LEVEL"))
 	handler := tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      level,
-		TimeFormat: "15:04:05.000",
+		TimeFormat: fileTimeFormat,
 		NoColor:    !isTerminal(os.Stderr),
 	})
 	return slog.New(handler).With("component", component)
@@ -70,7 +75,7 @@ func NewWriterLoggerDefault(component string, w io.Writer) *slog.Logger {
 	level := parseLevel(os.Getenv("LOG_LEVEL"))
 	handler := tint.NewHandler(w, &tint.Options{
 		Level:      level,
-		TimeFormat: "15:04:05.000",
+		TimeFormat: fileTimeFormat,
 		NoColor:    true,
 	})
 	base := slog.New(handler)

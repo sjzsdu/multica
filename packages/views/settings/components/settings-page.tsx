@@ -9,6 +9,7 @@ import {
   FolderGit2,
   Keyboard,
   KeyRound,
+  Layers,
   ListPlus,
   Lock,
   MessagesSquare,
@@ -51,6 +52,7 @@ import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
+import { SystemFallbackRuntimeTab } from "./system-fallback-runtime-tab";
 import { BillingTab } from "./billing-tab";
 import {
   SETTINGS_ANCHOR_ATTR,
@@ -231,6 +233,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
+            entry(
+              "fallback-runtime",
+              t(($) => $.page.tabs.fallback_runtime),
+              Layers,
+              <SystemFallbackRuntimeTab />,
+              { adminOnly: true },
+            ),
             ...(pluginsEnabled
               ? [
                   entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {

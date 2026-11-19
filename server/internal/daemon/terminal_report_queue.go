@@ -56,6 +56,7 @@ type persistedTerminalTaskReport struct {
 	FailureReason         string    `json:"failure_reason,omitempty"`
 	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
 	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
+	DispatchedAt          string    `json:"dispatched_at,omitempty"`
 
 	PermanentRejectionCount   int        `json:"permanent_rejection_count,omitempty"`
 	FirstPermanentRejectionAt *time.Time `json:"first_permanent_rejection_at,omitempty"`
@@ -146,6 +147,7 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 		FailureReason:         report.failureReason,
 		SessionRolloutMissing: report.sessionRolloutMissing,
 		RetiredSessionID:      report.retiredSessionID,
+		DispatchedAt:          report.dispatchedAt,
 	}, nil
 }
 
@@ -177,6 +179,7 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		failureReason:         record.FailureReason,
 		sessionRolloutMissing: record.SessionRolloutMissing,
 		retiredSessionID:      record.RetiredSessionID,
+		dispatchedAt:          record.DispatchedAt,
 	}, nil
 }
 
@@ -679,6 +682,7 @@ func (d *Daemon) handleTerminalReportDeliveryError(ctx context.Context, item pen
 			failureReason:         "agent_error.unknown",
 			sessionRolloutMissing: item.report.sessionRolloutMissing,
 			retiredSessionID:      item.report.retiredSessionID,
+			dispatchedAt:          item.report.dispatchedAt,
 		}
 		if err := d.sendTerminalTaskReport(ctx, fallback, defaultTerminalRetrySchedule); err != nil {
 			d.logger.Error("terminal report quarantine failure compensation was not accepted",

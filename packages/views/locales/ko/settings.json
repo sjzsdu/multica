@@ -357,6 +357,16 @@
       "start_date": "시작일"
     }
   },
+  "fallback_runtime": {
+    "title": "런타임 폴백",
+    "description": "에이전트의 기본 런타임과 자체 폴백 체인이 모두 차단되면 모든 워크스페이스가 여기의 런타임으로 폴백합니다.",
+    "empty": "전역 폴백 런타임이 설정되지 않았습니다.",
+    "hint": "런타임은 현재 워크스페이스에서 선택합니다. 모델을 선택하지 않으면 런타임의 기본 모델을 사용합니다.",
+    "admin_only": "워크스페이스 소유자와 관리자만 변경할 수 있습니다.",
+    "saved": "전역 폴백 런타임을 업데이트했습니다.",
+    "save_error": "전역 폴백 런타임을 저장하지 못했습니다.",
+    "load_error": "전역 폴백 런타임을 불러오지 못했습니다."
+  },
   "mcp": {
     "description": "추가 후 에이전트의 MCP 탭에서 할당하세요.",
     "servers_title": "공유 서버",
@@ -408,6 +418,7 @@
       "quick_actions": "퀵 액션",
       "plugins": "플러그인",
       "mcp": "MCP 서버",
+      "fallback_runtime": "런타임 폴백",
       "billing": "결제 및 요금제",
       "code": "코드",
       "channels": "메신저",
@@ -736,6 +747,13 @@
     "usage_help": "사용 방법"
   },
   "workspace": {
+    "storage_section": "스토리지",
+    "storage_migration_label": "로컬 파일 마이그레이션",
+    "storage_migration_pending": "첨부 파일 {{attachments}}개와 아바타 {{avatars}}개가 아직 이 서버의 로컬 디스크에 있습니다.",
+    "storage_migration_running": "오브젝트 스토리지로 이동 중… {{migrated}}개 이동, {{failed}}개 실패.",
+    "storage_migration_finished": "파일 {{migrated}}개를 오브젝트 스토리지로 이동했습니다. {{failed}}개 실패.",
+    "storage_migration_start": "파일 마이그레이션",
+    "storage_migration_start_failed": "스토리지 마이그레이션을 시작하지 못했습니다.",
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",

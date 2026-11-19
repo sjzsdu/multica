@@ -4,7 +4,7 @@
 import { QueryClient, QueryClientProvider, QueryObserver, type InvalidateQueryFilters, type QueryKey } from "@tanstack/react-query";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import type { WSClient } from "../api/ws-client";
 import { EMPTY_ISSUE_VIEW_PREFERENCE } from "../api/schemas";
 import { defaultStorage } from "../platform/storage";
@@ -27,6 +27,25 @@ import type { IssueTableQuerySpec } from "../types";
 import { getCurrentWsId } from "../platform/workspace-storage";
 import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
+
+// Node 25 ships a partial `localStorage` shim under jsdom that's missing
+// `clear`/`removeItem`; replace it with a real in-memory Storage so persist
+// can round-trip values.
+beforeAll(() => {
+  if (typeof globalThis.localStorage?.clear !== "function") {
+    const values = new Map<string, string>();
+    const storage: Storage = {
+      get length() { return values.size; },
+      clear: () => values.clear(),
+      getItem: (k) => values.get(k) ?? null,
+      key: (i) => Array.from(values.keys())[i] ?? null,
+      removeItem: (k) => { values.delete(k); },
+      setItem: (k, v) => { values.set(k, v); },
+    };
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+  }
+});
 
 vi.mock("../search-index/instance", () => ({
   forgetLocalSearchIndex: vi.fn(async () => undefined),

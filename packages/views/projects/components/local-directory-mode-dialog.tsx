@@ -40,6 +40,8 @@ interface LocalDirectoryModeDialogProps {
   path: string;
   /** Mode to preselect — the current mode when editing, in_place when adding. */
   value: LocalDirectoryExecutionMode;
+  /** Newline-separated sparse checkout paths, used only for worktree mode. */
+  sparsePaths?: string;
   /** Set when worktree cannot be chosen; the option renders disabled with a reason. */
   unavailableReason?: WorktreeUnavailableReason;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
@@ -47,7 +49,7 @@ interface LocalDirectoryModeDialogProps {
   saving?: boolean;
   /** Confirm label differs between adding a resource and editing one. */
   confirmLabel: string;
-  onConfirm: (mode: LocalDirectoryExecutionMode) => void;
+  onConfirm: (mode: LocalDirectoryExecutionMode, sparsePaths?: string) => void;
 }
 
 /**
@@ -64,6 +66,7 @@ export function LocalDirectoryModeDialog({
   onOpenChange,
   path,
   value,
+  sparsePaths = "",
   unavailableReason,
   errorMessage,
   saving = false,
@@ -72,12 +75,16 @@ export function LocalDirectoryModeDialog({
 }: LocalDirectoryModeDialogProps) {
   const { t } = useT("projects");
   const [selected, setSelected] = useState<LocalDirectoryExecutionMode>(value);
+  const [sparseDraft, setSparseDraft] = useState(sparsePaths);
 
   // Re-sync when the dialog is reopened for a different resource, otherwise the
   // previous row's mode would be preselected for this one.
   useEffect(() => {
-    if (open) setSelected(value);
-  }, [open, value]);
+    if (open) {
+      setSelected(value);
+      setSparseDraft(sparsePaths);
+    }
+  }, [open, value, sparsePaths]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -99,6 +106,24 @@ export function LocalDirectoryModeDialog({
           unavailableReason={unavailableReason}
         />
 
+        {selected === "worktree" && (
+          <div className="space-y-1.5">
+            <label className="text-caption font-medium" htmlFor="local-directory-sparse-paths">
+              {t(($) => $.resources.sparse_paths_label)}
+            </label>
+            <textarea
+              id="local-directory-sparse-paths"
+              value={sparseDraft}
+              onChange={(e) => setSparseDraft(e.target.value)}
+              placeholder={t(($) => $.resources.sparse_paths_placeholder)}
+              className="min-h-20 w-full resize-y rounded-md border bg-transparent px-2 py-1.5 font-mono text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <p className="text-micro text-muted-foreground">
+              {t(($) => $.resources.sparse_paths_hint)}
+            </p>
+          </div>
+        )}
+
         {errorMessage && (
           <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">
             <TriangleAlert className="size-3.5 mt-0.5 shrink-0" />
@@ -114,7 +139,14 @@ export function LocalDirectoryModeDialog({
           >
             {t(($) => $.resources.mode_cancel)}
           </Button>
-          <Button onClick={() => onConfirm(selected)} disabled={saving}>
+          <Button
+            onClick={() => {
+              const trimmedSparse = sparseDraft.trim();
+              if (trimmedSparse) onConfirm(selected, sparseDraft);
+              else onConfirm(selected);
+            }}
+            disabled={saving}
+          >
             {confirmLabel}
           </Button>
         </DialogFooter>

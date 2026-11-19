@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -28,6 +29,11 @@ const (
 	ttSlugA       = "ws-a"
 	ttSlugB       = "ws-b"
 	ttSlugDBError = "ws-db-error"
+
+	// A token that exists but has been explicitly revoked. It must yield a
+	// distinct 401 code so operators can tell a stale daemon from a forged or
+	// expired token.
+	ttRevokedToken = "mat_test_revoked_token"
 )
 
 // fakeTaskTokenDB is a minimal db.DBTX that answers the two queries the
@@ -50,6 +56,19 @@ func (f *fakeTaskTokenDB) Query(context.Context, string, ...interface{}) (pgx.Ro
 
 func (f *fakeTaskTokenDB) QueryRow(_ context.Context, sql string, args ...interface{}) pgx.Row {
 	switch {
+	case strings.Contains(sql, "name: GetTaskTokenByHashForRevocationCheck"):
+		if len(args) != 1 || args[0] != auth.HashToken(ttRevokedToken) {
+			return fakeRow{err: pgx.ErrNoRows}
+		}
+		return fakeRow{scan: func(dest ...any) {
+			*dest[0].(*pgtype.UUID) = util.MustParseUUID("55555555-0000-4000-8000-000000000005")
+			*dest[2].(*pgtype.UUID) = util.MustParseUUID(ttTaskID)
+			*dest[3].(*pgtype.UUID) = util.MustParseUUID(ttAgentID)
+			*dest[4].(*pgtype.UUID) = util.MustParseUUID(ttWorkspaceA)
+			*dest[5].(*pgtype.UUID) = util.MustParseUUID(ttUserID)
+			*dest[8].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Valid: true}
+			*dest[9].(*pgtype.Timestamptz) = pgtype.Timestamptz{Time: time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC), Valid: true}
+		}}
 	case strings.Contains(sql, "name: GetTaskTokenByHash"):
 		if len(args) != 1 || args[0] != auth.HashToken(ttTestToken) {
 			return fakeRow{err: pgx.ErrNoRows}
@@ -98,6 +117,39 @@ func (r fakeRow) Scan(dest ...any) error {
 // mat_ token bound to workspace A and asserts that an explicit selector for
 // any other workspace is refused before the handler runs, instead of being
 // silently replaced by A (GitHub #9403).
+// TestAuth_TaskTokenRevokedDistinctFromInvalid covers C4: a revoked token is a
+// 401 task_token_revoked, while an unknown token stays invalid token.
+func TestAuth_TaskTokenRevokedDistinctFromInvalid(t *testing.T) {
+	cases := []struct {
+		name     string
+		token    string
+		wantCode string
+	}{
+		{name: "revoked token", token: ttRevokedToken, wantCode: "task_token_revoked"},
+		{name: "unknown token", token: "mat_test_unknown", wantCode: "invalid token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			queries := db.New(&fakeTaskTokenDB{t: t})
+			handler := Auth(queries, nil, nil, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("handler must not run for a rejected token")
+			}))
+
+			req := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", w.Code)
+			}
+			if !strings.Contains(w.Body.String(), tc.wantCode) {
+				t.Fatalf("body = %s, want %q", w.Body.String(), tc.wantCode)
+			}
+		})
+	}
+}
+
 func TestAuth_TaskTokenWorkspaceSelectors(t *testing.T) {
 	cases := []struct {
 		name       string

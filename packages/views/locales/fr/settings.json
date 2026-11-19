@@ -359,6 +359,16 @@
       "start_date": "Date de début"
     }
   },
+  "fallback_runtime": {
+    "title": "Repli de runtime",
+    "description": "Lorsque le runtime principal d'un agent et sa propre chaîne de repli sont tous deux bloqués, tous les espaces de travail basculent vers ce runtime.",
+    "empty": "Aucun runtime de repli global n'est configuré.",
+    "hint": "Le runtime provient de cet espace de travail ; sans modèle, son modèle par défaut est utilisé.",
+    "admin_only": "Seuls les propriétaires et administrateurs de l'espace de travail peuvent modifier ceci.",
+    "saved": "Runtime de repli global mis à jour.",
+    "save_error": "Impossible d'enregistrer le runtime de repli global.",
+    "load_error": "Impossible de charger le runtime de repli global."
+  },
   "mcp": {
     "description": "Après l’ajout d’un serveur, assignez-le depuis l’onglet MCP d’un agent.",
     "servers_title": "Serveurs partagés",
@@ -410,6 +420,7 @@
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",
       "mcp": "Serveurs MCP",
+      "fallback_runtime": "Repli de runtime",
       "billing": "Facturation",
       "code": "Code",
       "channels": "Messagerie",
@@ -741,6 +752,13 @@
     "usage_help": "Utilisation"
   },
   "workspace": {
+    "storage_section": "Stockage",
+    "storage_migration_label": "Migration des fichiers locaux",
+    "storage_migration_pending": "{{attachments}} pièces jointes et {{avatars}} avatars sont encore sur le disque local de ce serveur.",
+    "storage_migration_running": "Déplacement vers le stockage d'objets… {{migrated}} déplacés, {{failed}} en échec.",
+    "storage_migration_finished": "{{migrated}} fichiers déplacés vers le stockage d'objets, {{failed}} en échec.",
+    "storage_migration_start": "Migrer les fichiers",
+    "storage_migration_start_failed": "Échec du démarrage de la migration du stockage.",
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",

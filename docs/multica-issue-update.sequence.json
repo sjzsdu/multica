@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Multica Issue 状态更新时序",
+    "output": "multica-issue-update.sequence.html",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 660],
+    "views": [
+      { "id": "write-path", "label": "写入路径", "focus": ["web", "core", "api", "postgres"], "note": "从 UI mutation 到 API、事务和规范化响应。" },
+      { "id": "realtime-path", "label": "实时广播", "focus": ["api", "event-bus", "ws", "core", "query-cache"], "note": "提交后由事件总线与 WebSocket 驱动客户端缓存。" },
+      { "id": "reconnect-path", "label": "重连恢复", "focus": ["ws", "core", "query-cache"], "note": "断线重连后重新订阅并刷新不确定的缓存投影。" }
+    ]
+  },
+  "participants": [
+    { "id": "web", "type": "frontend", "label": "Web + Desktop", "sublabel": "views" },
+    { "id": "core", "type": "backend", "label": "Core Client", "sublabel": "mutation + Query" },
+    { "id": "api", "type": "backend", "label": "Go API", "sublabel": "Chi handler / service" },
+    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "issue tx" },
+    { "id": "event-bus", "type": "messagebus", "label": "Event Bus", "sublabel": "domain event" },
+    { "id": "ws", "type": "messagebus", "label": "WebSocket Hub", "sublabel": "workspace scopes" },
+    { "id": "query-cache", "type": "database", "label": "Query Cache", "sublabel": "React Query" }
+  ],
+  "segments": [
+    { "from": 160, "to": 320, "label": "Issue 写入" },
+    { "from": 340, "to": 460, "label": "事件广播" },
+    { "from": 480, "to": 590, "label": "缓存收敛" }
+  ],
+  "messages": [
+    { "id": "ui-mutate", "from": "web", "to": "core", "y": 180, "label": "用户选择新状态", "variant": "emphasis" },
+    { "id": "core-patch", "from": "core", "to": "query-cache", "y": 210, "label": "optimistic patch", "variant": "dashed", "note": "仅在结果可预测且无需导航时使用" },
+    { "id": "core-api", "from": "core", "to": "api", "y": 240, "label": "PATCH /api/issues/{id}", "variant": "emphasis" },
+    { "id": "api-db", "from": "api", "to": "postgres", "y": 270, "label": "BEGIN + UPDATE issue", "variant": "default" },
+    { "id": "db-api", "from": "postgres", "to": "api", "y": 300, "label": "commit + canonical row", "variant": "return" },
+    { "id": "api-response", "from": "api", "to": "core", "y": 350, "label": "200 + parsed response", "variant": "return" },
+    { "id": "core-ui", "from": "core", "to": "web", "y": 380, "label": "render canonical state", "variant": "return" },
+    { "id": "api-event", "from": "api", "to": "event-bus", "y": 410, "label": "issue:updated", "variant": "dashed" },
+    { "id": "event-ws", "from": "event-bus", "to": "ws", "y": 440, "label": "fan-out workspace event", "variant": "dashed" },
+    { "id": "ws-core", "from": "ws", "to": "core", "y": 470, "label": "payload + actor", "variant": "dashed" },
+    { "id": "core-cache", "from": "core", "to": "query-cache", "y": 500, "label": "patch or invalidate", "variant": "emphasis" },
+    { "id": "cache-ui", "from": "query-cache", "to": "web", "y": 530, "label": "rerender subscribers", "variant": "return" },
+    { "id": "reconnect", "from": "core", "to": "ws", "y": 570, "label": "reconnect + resubscribe", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "core", "from": 176, "to": 430, "type": "backend" },
+    { "participant": "api", "from": 256, "to": 392, "type": "backend" },
+    { "participant": "postgres", "from": 296, "to": 352, "type": "database" },
+    { "participant": "event-bus", "from": 456, "to": 508, "type": "messagebus" },
+    { "participant": "ws", "from": 496, "to": 738, "type": "messagebus" },
+    { "participant": "query-cache", "from": 216, "to": 630, "type": "database" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "写入边界", "items": ["Core mutation 调用 Go API", "API 事务提交后返回规范化数据", "UI 不直接操作数据库或 WS payload"] },
+    { "dot": "emerald", "title": "实时一致性", "items": ["事件在提交后进入 Event Bus", "WebSocket 按 workspace scope 广播", "客户端只更新 Query cache，不镜像到 Zustand"] },
+    { "dot": "amber", "title": "重连策略", "items": ["WSClient 使用指数退避与 jitter", "重连后重新订阅 workspace", "不确定投影通过 Query refresh 收敛"] }
+  ]
+}

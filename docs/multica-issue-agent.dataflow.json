@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Multica Issue 与 Agent 数据流",
+    "output": "multica-issue-agent.dataflow.html",
+    "quality_profile": "showcase",
+    "viewBox": [1280, 850],
+    "views": [
+      { "id": "issue-path", "label": "Issue 数据路径", "focus": ["web-input", "api-boundary", "issue-store", "event-stream", "web-query"], "note": "跟踪 Issue 从客户端请求到持久化和缓存投影。" },
+      { "id": "agent-path", "label": "Agent 任务路径", "focus": ["daemon-input", "api-boundary", "task-store", "event-stream", "mobile-query"], "note": "跟踪 Daemon 进度回报如何进入任务存储并同步到客户端。" },
+      { "id": "realtime-path", "label": "实时与 Inbox", "focus": ["event-stream", "redis-relay", "web-query", "mobile-query", "inbox"], "note": "观察事件广播、Redis relay、Query cache 和 Inbox 的消费关系。" }
+    ]
+  },
+  "stages": [
+    { "label": "输入端" },
+    { "label": "API 边界" },
+    { "label": "持久化" },
+    { "label": "事件与中继" },
+    { "label": "客户端投影" }
+  ],
+  "nodes": [
+    { "id": "web-input", "type": "frontend", "label": "Web / Desktop", "sublabel": "Issue / Chat / Inbox", "stage": 0, "row": 0, "tag": "packages/views" },
+    { "id": "mobile-input", "type": "frontend", "label": "Mobile", "sublabel": "native queries + WS", "stage": 0, "row": 2, "tag": "apps/mobile" },
+    { "id": "daemon-input", "type": "external", "label": "Agent Daemon", "sublabel": "claim / progress / result", "stage": 0, "row": 4, "tag": "server/internal/daemon" },
+    { "id": "api-boundary", "type": "backend", "label": "Go API 边界", "sublabel": "auth · workspace · handlers", "stage": 1, "row": 1, "tag": "server/cmd/server" },
+    { "id": "issue-store", "type": "database", "label": "Issue / Workspace", "sublabel": "sqlc + pgx", "stage": 2, "row": 0, "tag": "PostgreSQL" },
+    { "id": "task-store", "type": "database", "label": "Agent Task Queue", "sublabel": "queued · running · result", "stage": 2, "row": 3, "tag": "agent_task_queue" },
+    { "id": "event-stream", "type": "messagebus", "label": "Domain Events", "sublabel": "issue / task / inbox", "stage": 3, "row": 1, "tag": "Event Bus" },
+    { "id": "redis-relay", "type": "database", "label": "Redis Relay", "sublabel": "multi-node fan-out", "stage": 3, "row": 4, "tag": "optional infra" },
+    { "id": "web-query", "type": "frontend", "label": "Web Query Cache", "sublabel": "React Query", "stage": 4, "row": 0, "tag": "packages/core" },
+    { "id": "mobile-query", "type": "frontend", "label": "Mobile Query Cache", "sublabel": "TanStack Query", "stage": 4, "row": 2, "tag": "apps/mobile" },
+    { "id": "inbox", "type": "frontend", "label": "Inbox Projection", "sublabel": "dedupe + unread count", "stage": 4, "row": 4, "tag": "core/inbox" }
+  ],
+  "flows": [
+    { "id": "web-api", "from": "web-input", "to": "api-boundary", "label": "Issue / Chat request", "classification": "HTTP JSON", "variant": "emphasis" },
+    { "id": "mobile-api", "from": "mobile-input", "to": "api-boundary", "label": "native", "classification": "native request", "variant": "default", "labelDx": -80, "labelDy": -36 },
+    { "id": "daemon-api", "from": "daemon-input", "to": "api-boundary", "label": "progress", "classification": "daemon contract", "variant": "dashed", "labelDy": 36 },
+    { "id": "api-issue", "from": "api-boundary", "to": "issue-store", "label": "workspace-scoped rows", "classification": "transaction", "variant": "emphasis" },
+    { "id": "api-task", "from": "api-boundary", "to": "task-store", "label": "task state + output", "classification": "transaction", "variant": "emphasis" },
+    { "id": "issue-event", "from": "issue-store", "to": "event-stream", "label": "issue:updated", "classification": "domain event", "variant": "dashed" },
+    { "id": "task-event", "from": "task-store", "to": "event-stream", "label": "task:progress / completed", "classification": "domain event", "variant": "dashed" },
+    { "id": "event-redis", "from": "event-stream", "to": "redis-relay", "label": "relay stream", "classification": "multi-node", "variant": "dashed" },
+    { "id": "event-web", "from": "event-stream", "to": "web-query", "label": "WebSocket payload", "classification": "patch / invalidate", "variant": "emphasis" },
+    { "id": "event-mobile", "from": "event-stream", "to": "mobile-query", "label": "feature event", "classification": "cellular-aware patch", "variant": "default" },
+    { "id": "relay-inbox", "from": "redis-relay", "to": "inbox", "label": "replay", "classification": "reconnect", "variant": "dashed", "labelDy": 53 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "持久化来源", "items": ["Issue、Workspace、Task 都由 Go API 写入 PostgreSQL", "关系由应用层维护，不依赖外键级联", "sqlc 生成查询代码保持类型边界"] },
+    { "dot": "emerald", "title": "客户端投影", "items": ["React Query 持有服务端资源缓存", "WebSocket payload 可 patch 或 invalidate", "Inbox 在渲染和计数前做去重"] },
+    { "dot": "violet", "title": "多节点与移动端", "items": ["Redis relay 承担多节点事件中继", "Mobile 维护自己的 cache key 与 updaters", "重连后刷新可能遗漏的投影"] }
+  ]
+}

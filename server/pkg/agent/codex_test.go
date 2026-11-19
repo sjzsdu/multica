@@ -4847,7 +4847,9 @@ func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string,
 		mu       sync.Mutex
 		messages []Message
 	)
+	drained := make(chan struct{})
 	go func() {
+		defer close(drained)
 		for msg := range session.Messages {
 			mu.Lock()
 			messages = append(messages, msg)
@@ -4858,6 +4860,14 @@ func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string,
 	case result, ok := <-session.Result:
 		if !ok {
 			t.Fatal("result channel closed without a value")
+		}
+		// Messages is closed before Result is sent, but the collector goroutine
+		// may still be appending the final batch. Wait for it to drain so the
+		// transcript assertions see every message the backend emitted.
+		select {
+		case <-drained:
+		case <-time.After(budget):
+			t.Fatal("timeout draining messages")
 		}
 		mu.Lock()
 		collected := append([]Message(nil), messages...)

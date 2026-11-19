@@ -32,10 +32,11 @@ const (
 // project resources. Defined locally so the daemon does not have to import
 // the server handler package.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath     string   `json:"local_path"`
+	DaemonID      string   `json:"daemon_id"`
+	Label         string   `json:"label,omitempty"`
+	ExecutionMode string   `json:"execution_mode,omitempty"`
+	SparsePaths   []string `json:"sparse_paths,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory

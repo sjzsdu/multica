@@ -2,7 +2,7 @@ import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema, SystemFallbackRuntimeSchema } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
@@ -36,6 +36,8 @@ import type {
   MikaBootstrapResponse,
   CreateAgentRequest,
   AgentBuilderRuntimeSwitch,
+  AgentFallbackRuntimeEntry,
+  SystemFallbackRuntime,
   AgentBuilderSession,
   AgentBuilderSessionSummary,
   StoredAgentDraft,
@@ -133,6 +135,7 @@ import type {
   UpdateLabelRequest,
   ListLabelsResponse,
   ListIssueStatusesResponse,
+  StorageMigrationStatus,
   IssueStatusCategory,
   IssueStatusEntry,
   CreateIssueStatusRequest,
@@ -220,6 +223,8 @@ import type {
   RedeemTelegramBindingTokenResponse,
   Squad,
   SquadMember,
+  SquadWorkflowRun,
+  SquadWorkflowApproval,
   SquadMemberStatusListResponse,
   BillingBalance,
   BillingTransactionsPage,
@@ -278,6 +283,10 @@ import {
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
+  StorageMigrationStatusSchema,
+  StartStorageMigrationResponseSchema,
+  EMPTY_STORAGE_MIGRATION_STATUS,
+  EMPTY_START_STORAGE_MIGRATION_RESPONSE,
   ChildIssuesResponseSchema,
   IssueDuplicatesResponseSchema,
   ChildIssueProgressResponseSchema,
@@ -359,6 +368,9 @@ import {
   SearchIndexChangesSchema,
   SquadSchema,
   SquadListSchema,
+  SquadWorkflowRunListSchema,
+  EMPTY_SQUAD_WORKFLOW_RUN_LIST,
+  SquadWorkflowApprovalSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TaskMessageListSchema,
@@ -1040,6 +1052,10 @@ export class ApiClient {
     });
   }
 
+  async localLogin(): Promise<LoginResponse> {
+    return this.fetch("/auth/local", { method: "POST" });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }
@@ -1441,6 +1457,27 @@ export class ApiClient {
 
   async updateWorkspaceSystemWakeup(rule: WorkspaceSystemWakeup["rule"], input: { enabled?: boolean; instruction?: string }): Promise<void> {
     await this.fetch(`/api/system-wakeups/${encodeURIComponent(rule)}`, { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  /** The instance-wide last-resort runtime, or null when the tier is off. */
+  async getSystemFallbackRuntime(): Promise<AgentFallbackRuntimeEntry | null> {
+    const raw = await this.fetch<unknown>("/api/system-fallback-runtime");
+    const parsed = parseWithFallback<SystemFallbackRuntime>(raw, SystemFallbackRuntimeSchema, { fallback_runtime: null }, {
+      endpoint: "GET /api/system-fallback-runtime",
+    });
+    return parsed.fallback_runtime;
+  }
+
+  /** Replaces the global fallback; pass null to turn the tier off. */
+  async updateSystemFallbackRuntime(entry: AgentFallbackRuntimeEntry | null): Promise<AgentFallbackRuntimeEntry | null> {
+    const raw = await this.fetch<unknown>("/api/system-fallback-runtime", {
+      method: "PUT",
+      body: JSON.stringify({ fallback_runtime: entry }),
+    });
+    const parsed = parseWithFallback<SystemFallbackRuntime>(raw, SystemFallbackRuntimeSchema, { fallback_runtime: null }, {
+      endpoint: "PUT /api/system-fallback-runtime",
+    });
+    return parsed.fallback_runtime;
   }
 
   async disableIssueWakeup(issueId: string, wakeupId: string): Promise<void> {
@@ -4516,6 +4553,38 @@ export class ApiClient {
     });
   }
 
+  // Storage migration (local disk → object store, self-hosted cutover).
+  // Workspace owner/admin only. Any non-2xx response (older server 404,
+  // feature disabled 403, misconfigured backend 5xx) falls back to
+  // available=false so the settings UI simply hides itself instead of
+  // surfacing an error banner. parseWithFallback only covers malformed 2xx
+  // bodies — the fetch layer itself throws ApiError on non-2xx.
+  async getStorageMigrationStatus(): Promise<StorageMigrationStatus> {
+    try {
+      const raw = await this.fetch<unknown>("/api/storage-migration");
+      return parseWithFallback(raw, StorageMigrationStatusSchema, EMPTY_STORAGE_MIGRATION_STATUS, {
+        endpoint: "GET /api/storage-migration",
+      });
+    } catch (error) {
+      // ApiError means the server answered with a status code (404 on older
+      // backends, 403 on non-admin members, 404 when the route is gated
+      // behind an env flag). All of these are "treat as unavailable" —
+      // the UI hides the banner and retry loops stay quiet. Transport
+      // errors (network down, DNS) still throw so callers can surface them.
+      if (error instanceof ApiError) {
+        return EMPTY_STORAGE_MIGRATION_STATUS;
+      }
+      throw error;
+    }
+  }
+
+  async startStorageMigration(): Promise<{ started: boolean }> {
+    const raw = await this.fetch<unknown>("/api/storage-migration", { method: "POST" });
+    return parseWithFallback(raw, StartStorageMigrationResponseSchema, EMPTY_START_STORAGE_MIGRATION_RESPONSE, {
+      endpoint: "POST /api/storage-migration",
+    });
+  }
+
   // Custom issue properties
   async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
     const suffix = includeArchived ? "?include_archived=true" : "";
@@ -4853,14 +4922,14 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
+  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string; workflow?: Record<string, unknown> }): Promise<Squad> {
     const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "POST /api/squads",
     }) as Squad;
   }
 
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
+  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string; workflow?: Record<string, unknown> }): Promise<Squad> {
     const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "PUT /api/squads/:id",
@@ -4896,6 +4965,34 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  async listIssueWorkflowRuns(issueId: string): Promise<SquadWorkflowRun[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/workflow-runs`);
+    return parseWithFallback(raw, SquadWorkflowRunListSchema, EMPTY_SQUAD_WORKFLOW_RUN_LIST, {
+      endpoint: "GET /api/issues/:id/workflow-runs",
+    }) as SquadWorkflowRun[];
+  }
+
+  async upsertIssueWorkflowApproval(
+    issueId: string,
+    runId: string,
+    data: { gate: "review" | "human_approval"; approved: boolean; note?: string },
+  ): Promise<SquadWorkflowApproval> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/workflow-runs/${runId}/approvals`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SquadWorkflowApprovalSchema, {
+      id: "",
+      closed_stage: 0,
+      gate: data.gate,
+      approved: data.approved,
+      approved_by_type: "",
+      approved_by_id: "",
+      note: data.note,
+      approved_at: "",
+    }, { endpoint: "POST /api/issues/:id/workflow-runs/:runId/approvals" }) as SquadWorkflowApproval;
   }
 
   // Autopilots

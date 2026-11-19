@@ -735,6 +735,40 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	}
 }
 
+func TestLocalOnlyProjectRendersExecutionAndDeliveryBoundary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID:   "11111111-2222-3333-4444-555555555555",
+		ProjectID: "22222222-3333-4444-5555-666666666666",
+		ProjectResources: []ProjectResourceForEnv{{
+			ID:           "33333333-4444-5555-6666-777777777777",
+			ResourceType: "local_directory",
+			ResourceRef:  []byte(`{"local_path":"/Users/dev/project","daemon_id":"daemon-a"}`),
+		}},
+	}
+	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("read CLAUDE.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"Execution and delivery boundary",
+		"Do not infer a remote from workspace settings",
+		"create or update a pull request",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing local-only boundary %q", want)
+		}
+	}
+	if strings.Contains(s, "## Repositories") {
+		t.Error("CLAUDE.md should not render repositories for a local-only project")
+	}
+}
+
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -927,6 +961,37 @@ func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
 	// tasks, where an empty managed directory is noise.
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
 		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
+	}
+}
+
+func TestRewriteLocalDirectoryResourcesForWorktreeHidesOriginalPathInBrief(t *testing.T) {
+	t.Parallel()
+	originalPath := "/Users/dev/project"
+	worktreePath := "/Users/dev/.multica/workspaces/ws/task/worktree"
+	resources := []ProjectResourceForEnv{
+		{
+			ID:           "resource-1",
+			ResourceType: "local_directory",
+			ResourceRef:  json.RawMessage(`{"local_path":"/Users/dev/project","daemon_id":"daemon-1","execution_mode":"worktree"}`),
+			Label:        "project",
+		},
+	}
+
+	rewritten := RewriteLocalDirectoryResourcesForWorktree(resources, originalPath, worktreePath)
+	brief := buildMetaSkillContent("claude", TaskContextForEnv{
+		ProjectID:        "project-1",
+		ProjectTitle:     "Project",
+		ProjectResources: rewritten,
+	})
+
+	if strings.Contains(brief, originalPath) {
+		t.Fatalf("runtime brief still exposes original checkout %q:\n%s", originalPath, brief)
+	}
+	if !strings.Contains(brief, worktreePath) {
+		t.Fatalf("runtime brief does not name task worktree %q:\n%s", worktreePath, brief)
+	}
+	if strings.Contains(string(resources[0].ResourceRef), worktreePath) {
+		t.Fatalf("rewrite mutated the persisted resource ref: %s", resources[0].ResourceRef)
 	}
 }
 

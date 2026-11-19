@@ -352,6 +352,22 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	agentName := os.Getenv("MULTICA_AGENT_NAME")
 	taskID := os.Getenv("MULTICA_TASK_ID")
 	taskToken := os.Getenv("MULTICA_TOKEN")
+	// A runtime that reuses a long-lived process freezes this environment, so
+	// the values above can belong to an earlier task the daemon no longer has
+	// an active credential for. The per-task credential file is written for
+	// this run; it wins whenever it is present.
+	if cred, _, ok := daemonTaskCredentials(); ok {
+		taskToken = cred.Token
+		if cred.TaskID != "" {
+			taskID = cred.TaskID
+		}
+		if cred.WorkspaceID != "" {
+			workspaceID = cred.WorkspaceID
+		}
+		if cred.AgentName != "" {
+			agentName = cred.AgentName
+		}
+	}
 	if taskToken == "" {
 		return fmt.Errorf("MULTICA_TOKEN not set (repo checkout requires the active task credential)")
 	}

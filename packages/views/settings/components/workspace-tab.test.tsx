@@ -84,6 +84,10 @@ vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
 }));
 
+vi.mock("./storage-migration-section", () => ({
+  StorageMigrationSection: () => null,
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));

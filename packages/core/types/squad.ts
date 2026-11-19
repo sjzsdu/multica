@@ -1,5 +1,51 @@
 export type SquadMemberType = "agent" | "member";
 
+export type SquadWorkflowMode = "manual" | "staged" | "delivery";
+export type SquadWorkflowCompletionSignal = "terminal_only" | "review_ready";
+export type SquadWorkflowMergeMode = "human" | "integrator" | "pr_close_intent";
+
+export interface SquadWorkflowPolicy {
+  mode: SquadWorkflowMode;
+  max_active_children: number;
+  child_completion_signal: SquadWorkflowCompletionSignal;
+  auto_promote_stage: boolean;
+  auto_finalize_parent: boolean;
+  require_tests: boolean;
+  require_review: boolean;
+  require_merge: boolean;
+  merge_mode: SquadWorkflowMergeMode;
+  human_approval_required: boolean;
+}
+
+export type SquadWorkflowGate = "tests" | "review" | "merge" | "human_approval";
+
+export interface SquadWorkflowApproval {
+  id: string;
+  closed_stage: number;
+  gate: SquadWorkflowGate;
+  approved: boolean;
+  approved_by_type: string;
+  approved_by_id: string;
+  note?: string;
+  approved_at: string;
+}
+
+export interface SquadWorkflowRun {
+  id: string;
+  squad_id: string;
+  parent_issue_id: string;
+  closed_stage: number;
+  next_stage: number;
+  state: string;
+  gate_snapshot: Record<string, unknown>;
+  attempt_count: number;
+  next_attempt_at: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+  approvals: SquadWorkflowApproval[];
+}
+
 export type SquadActivityOutcome = "action" | "no_action" | "failed";
 
 export interface SquadMemberPreview {
@@ -23,6 +69,7 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
+  workflow?: SquadWorkflowPolicy;
 }
 
 export interface SquadMember {
@@ -58,6 +105,7 @@ export interface UpdateSquadRequest {
   instructions?: string;
   leader_id?: string;
   avatar_url?: string;
+  workflow?: Partial<SquadWorkflowPolicy>;
 }
 
 export interface AddSquadMemberRequest {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/spf13/cobra"
 )
@@ -54,6 +55,131 @@ func testCmd() *cobra.Command {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().String("profile", "", "")
 	return cmd
+}
+
+// TestResolveTokenPrefersTaskCredentials covers the regression where a runtime
+// that reuses a long-lived process (jcode's shared server) hands the CLI the
+// environment of an earlier task, so the inherited MULTICA_TOKEN is already
+// revoked. The per-task credential file the daemon writes under the workdir is
+// authoritative inside a daemon task.
+func TestResolveTokenPrefersTaskCredentials(t *testing.T) {
+	workDir := t.TempDir()
+	credPath := filepath.Join(workDir, execenv.TaskCredentialsRelPath)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatalf("mkdir credentials dir: %v", err)
+	}
+	payload := `{"managed_by":"` + execenv.TaskCredentialsManagedBy + `","token":"mat_current_run"}`
+	if err := os.WriteFile(credPath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	t.Run("daemon context uses the file over a stale env token", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "mat_revoked_previous_run")
+		t.Setenv("MULTICA_TASK_ID", "task-current")
+		nested := filepath.Join(workDir, "repo", "sub")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+		t.Chdir(nested)
+		if got := resolveToken(testCmd()); got != "mat_current_run" {
+			t.Fatalf("resolveToken() = %q, want the credential file token", got)
+		}
+	})
+
+	t.Run("a matching env token is still overridden by the file", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "mat_current_run")
+		t.Setenv("MULTICA_TASK_ID", "task-current")
+		t.Chdir(workDir)
+		if got := resolveToken(testCmd()); got != "mat_current_run" {
+			t.Fatalf("resolveToken() = %q, want %q", got, "mat_current_run")
+		}
+	})
+
+	t.Run("outside daemon context the file is ignored", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "mat_env_only")
+		t.Chdir(t.TempDir())
+		if got := resolveToken(testCmd()); got != "mat_env_only" {
+			t.Fatalf("resolveToken() = %q, want %q", got, "mat_env_only")
+		}
+	})
+
+	t.Run("the file alone does not make a shell a daemon task", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Chdir(workDir)
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty (no daemon identity, no profile token)", got)
+		}
+	})
+}
+
+// TestNewAPIClientPrefersTaskCredentials proves the client carries this run's
+// identity rather than the frozen environment: token, task, workspace and
+// agent all come from the daemon-written credential file.
+func TestNewAPIClientPrefersTaskCredentials(t *testing.T) {
+	workDir := t.TempDir()
+	credPath := filepath.Join(workDir, execenv.TaskCredentialsRelPath)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatalf("mkdir credentials dir: %v", err)
+	}
+	payload := `{"managed_by":"` + execenv.TaskCredentialsManagedBy + `",` +
+		`"token":"mat_current","task_id":"task-current","workspace_id":"ws-current",` +
+		`"agent_id":"agent-current","agent_name":"coder"}`
+	if err := os.WriteFile(credPath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+
+	t.Setenv("MULTICA_TOKEN", "mat_revoked_previous_run")
+	t.Setenv("MULTICA_TASK_ID", "task-stale")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-stale")
+	t.Setenv("MULTICA_AGENT_ID", "agent-stale")
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:9")
+	t.Chdir(workDir)
+
+	client, err := newAPIClient(testCmd())
+	if err != nil {
+		t.Fatalf("newAPIClient: %v", err)
+	}
+	if client.Token != "mat_current" {
+		t.Fatalf("Token = %q, want the credential file token", client.Token)
+	}
+	if client.TaskID != "task-current" {
+		t.Fatalf("TaskID = %q, want task-current", client.TaskID)
+	}
+	if client.AgentID != "agent-current" {
+		t.Fatalf("AgentID = %q, want agent-current", client.AgentID)
+	}
+	if client.WorkspaceID != "ws-current" {
+		t.Fatalf("WorkspaceID = %q, want ws-current", client.WorkspaceID)
+	}
+}
+
+func TestTaskCredentialAtOrAbove(t *testing.T) {
+	root := t.TempDir()
+	credPath := filepath.Join(root, execenv.TaskCredentialsRelPath)
+	if err := os.MkdirAll(filepath.Dir(credPath), 0o755); err != nil {
+		t.Fatalf("mkdir credentials dir: %v", err)
+	}
+	payload := `{"managed_by":"` + execenv.TaskCredentialsManagedBy + `","token":"mat_walk"}`
+	if err := os.WriteFile(credPath, []byte(payload), 0o600); err != nil {
+		t.Fatalf("write credentials: %v", err)
+	}
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	got, path, ok := taskCredentialsAtOrAbove(nested)
+	if !ok || got.Token != "mat_walk" || path != credPath {
+		t.Fatalf("taskCredentialsAtOrAbove() = (%+v, %q, %v), want token %q at %q", got, path, ok, "mat_walk", credPath)
+	}
+
+	// A file owned by something else is not a daemon credential.
+	if err := os.WriteFile(credPath, []byte(`{"managed_by":"someone-else","token":"mat_foreign"}`), 0o600); err != nil {
+		t.Fatalf("rewrite foreign credentials: %v", err)
+	}
+	if got, _, ok := taskCredentialsAtOrAbove(nested); ok {
+		t.Fatalf("taskCredentialsAtOrAbove() = %+v, want no credential for a foreign file", got)
+	}
 }
 
 func TestResolveAppURL(t *testing.T) {
