@@ -73,6 +73,32 @@ multica daemon start
 
 `multica login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
 
+## Onboarding Presets
+
+The CLI ships pre-built agent teams. `multica onboard` installs one into the
+current workspace and binds every new agent to a runtime you pick.
+
+```bash
+# See what ships with this build
+multica onboard --list
+
+# Interactive: choose presets, individual agents/squads/automations, and a runtime
+multica onboard
+
+# Non-interactive
+multica onboard --preset solo-company --all --runtime-id <runtime-uuid> --yes
+
+# Preview without creating anything
+multica onboard --preset solo-company --all --runtime-id <runtime-uuid> --dry-run
+```
+
+Installation is idempotent: skills, agents, squads, and autopilots that already
+exist by name are reused, so re-running is safe. Existing agents keep their
+current configuration and skill assignments.
+
+Bundled autopilots start firing on their schedule as soon as they are created;
+pass `--no-autopilots` to install agents and squads only.
+
 ## Authentication
 
 ### Browser Login

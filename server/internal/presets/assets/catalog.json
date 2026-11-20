@@ -1,0 +1,373 @@
+{
+  "presets": [
+    {
+      "id": "solo-company",
+      "name": "Solo Company Team",
+      "description": "一人公司全栈 Agent 团队：机会发现 → 产品设计 → 开发交付 → 上线增长 → 数据复盘，含夜间交付推进自动化。",
+      "skills": [
+        {
+          "name": "agent-native-system-design",
+          "description": "Agent-Native 系统设计：工具契约、checkpoint、人机带宽、可观测性、多 Agent 编排",
+          "file": "skills/agent-native-system-design.md"
+        },
+        {
+          "name": "agentic-design-system",
+          "description": "Agentic Design System for conversational AI-first interfaces",
+          "file": "skills/agentic-design-system.md"
+        },
+        {
+          "name": "architecture-decision-record",
+          "description": "架构决策记录与系统设计原则",
+          "file": "skills/architecture-decision-record.md"
+        },
+        {
+          "name": "cold-outreach-playbook",
+          "description": "冷启动外联：名单分层、话术结构、跟进序列、反垃圾合规与复盘",
+          "file": "skills/cold-outreach-playbook.md"
+        },
+        {
+          "name": "community-and-social-publishing",
+          "description": "社区与社交发布：平台选择、发布节奏、发布前检查、互动口碑与危机处理",
+          "file": "skills/community-and-social-publishing.md"
+        },
+        {
+          "name": "competitive-research",
+          "description": "竞品分析与产品机会发现",
+          "file": "skills/competitive-research.md"
+        },
+        {
+          "name": "content-seo-engine",
+          "description": "内容与 SEO 引擎：关键词分层、选题、内容结构、技术SEO清单、复用与复盘",
+          "file": "skills/content-seo-engine.md"
+        },
+        {
+          "name": "data-driven-decision-framework",
+          "description": "数据驱动决策框架与指标体系",
+          "file": "skills/data-driven-decision-framework.md"
+        },
+        {
+          "name": "database-design-patterns",
+          "description": "数据库设计：索引/查询优化/迁移/软删除",
+          "file": "skills/database-design-patterns.md"
+        },
+        {
+          "name": "debugging-playbook",
+          "description": "调试手册：复现→假设→验证→修复→确认",
+          "file": "skills/debugging-playbook.md"
+        },
+        {
+          "name": "delivery-gate-playbook",
+          "description": "交付推进 SOP：巡检 in_review，送包公复核，按判定返工或合并 PR，最终标记完成。含幂等状态、CI 门禁与三轮升级规则。",
+          "file": "skills/delivery-gate-playbook.md"
+        },
+        {
+          "name": "gh-skill",
+          "description": "再使用gh时，需要选择一下使用哪一个账号， 当remote url 包含github_sjzsdu时， 需要自动切换到sjzsdu这个account, 其余自动使用gh默认账号。",
+          "file": "skills/gh-skill.md"
+        },
+        {
+          "name": "git-workflow",
+          "description": "Git 工作流：分支策略/commit 规范/rebase vs merge",
+          "file": "skills/git-workflow.md"
+        },
+        {
+          "name": "go-to-market-playbook",
+          "description": "市场进入作战手册：定位/ICP、渠道选择、发布节奏、指标与止损",
+          "file": "skills/go-to-market-playbook.md"
+        },
+        {
+          "name": "impeccable-frontend-design",
+          "description": "反 AI Slop 设计审计与质量检查",
+          "file": "skills/impeccable-frontend-design.md"
+        },
+        {
+          "name": "performance-optimization",
+          "description": "性能优化：先测后改/数据库/缓存/前端渲染",
+          "file": "skills/performance-optimization.md"
+        },
+        {
+          "name": "pragmatic-implementation",
+          "description": "务实的实现指南与编码检查清单",
+          "file": "skills/pragmatic-implementation.md"
+        },
+        {
+          "name": "project-audit-playbook",
+          "description": "全项目审计方法：三层推进/风险抽样/证据分级/问题分级/审计报告与基线",
+          "file": "skills/project-audit-playbook.md"
+        },
+        {
+          "name": "quality-engineer-playbook",
+          "description": "测试策略与验收检查清单",
+          "file": "skills/quality-engineer-playbook.md"
+        },
+        {
+          "name": "regression-and-flaky-test-strategy",
+          "description": "回归范围与 flaky 治理：影响面分析/基线/归因/CI 门禁分层",
+          "file": "skills/regression-and-flaky-test-strategy.md"
+        },
+        {
+          "name": "security-audit-checklist",
+          "description": "安全审计清单：认证/授权/租户隔离/输入处理/密钥/供应链/资源限制",
+          "file": "skills/security-audit-checklist.md"
+        },
+        {
+          "name": "software-design-principles",
+          "description": "软件设计原则：SOLID/DRY/设计模式/依赖倒置/解耦",
+          "file": "skills/software-design-principles.md"
+        },
+        {
+          "name": "solo-dev-architecture-constraints",
+          "description": "一人公司架构硬约束：成本上限、运维上限、退出策略、MVP 反模式",
+          "file": "skills/solo-dev-architecture-constraints.md"
+        },
+        {
+          "name": "sre-reliability-playbook",
+          "description": "SRE 可靠性与运维最佳实践",
+          "file": "skills/sre-reliability-playbook.md"
+        },
+        {
+          "name": "tech-stack-decision-matrix",
+          "description": "具体技术栈决策矩阵：数据库/框架/部署/认证/支付/队列/监控的真实对比",
+          "file": "skills/tech-stack-decision-matrix.md"
+        },
+        {
+          "name": "test-design-techniques",
+          "description": "测试设计技术：等价类/边界值/判定表/pairwise/状态迁移/风险分配",
+          "file": "skills/test-design-techniques.md"
+        },
+        {
+          "name": "ui-visual-verification",
+          "description": "界面质量验证：六状态矩阵/视觉回归门禁/规范审查/探索式走查",
+          "file": "skills/ui-visual-verification.md"
+        }
+      ],
+      "agents": [
+        {
+          "name": "Mika",
+          "description": "你的工作区 Chief of Staff。Mika 会把目标转化为任务、协调智能体，并帮你建立可复用的工作流。",
+          "instructions_file": "agents/mika.md",
+          "model": "gpt-5.6-sol",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": []
+        },
+        {
+          "name": "墨子 - 全栈工程师",
+          "description": "资深全栈工程师，擅长 React/Vue + Node.js/NestJS 技术栈，熟悉数据库设计和 DevOps",
+          "instructions_file": "agents/mozi.md",
+          "model": "deepseek-flash",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "database-design-patterns",
+            "debugging-playbook",
+            "gh-skill",
+            "git-workflow",
+            "performance-optimization",
+            "pragmatic-implementation",
+            "software-design-principles",
+            "ui-visual-verification"
+          ]
+        },
+        {
+          "name": "孔明 - 项目总协调",
+          "description": "独立开发团队 Leader：任务拆分、派发、阶段推进、收口与人工确认",
+          "instructions_file": "agents/kongming.md",
+          "model": "deepseek/deepseek-flash",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "data-driven-decision-framework"
+          ]
+        },
+        {
+          "name": "鲁班 - 首席架构师",
+          "description": "系统架构设计、技术选型、代码审查、性能优化、技术规范制定",
+          "instructions_file": "agents/luban.md",
+          "model": "deepseek-v4-pro",
+          "max_concurrent_tasks": 2,
+          "permission": "workspace",
+          "skills": [
+            "agent-native-system-design",
+            "architecture-decision-record",
+            "solo-dev-architecture-constraints",
+            "tech-stack-decision-matrix"
+          ]
+        },
+        {
+          "name": "巧匠 - 产品设计 & 增长",
+          "description": "UI/UX 设计、设计系统、交互原型、前端实现、落地页转化设计",
+          "instructions_file": "agents/qiaojiang.md",
+          "model": "deepseek-v4-flash",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "agentic-design-system",
+            "competitive-research",
+            "impeccable-frontend-design",
+            "ui-visual-verification"
+          ]
+        },
+        {
+          "name": "包公 - 质量工程师",
+          "description": "改动复核与上线验收：独立验证、测试设计、回归与风险判定",
+          "instructions_file": "agents/baogong.md",
+          "model": "deepseek-flash",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "debugging-playbook",
+            "quality-engineer-playbook",
+            "regression-and-flaky-test-strategy",
+            "software-design-principles",
+            "test-design-techniques",
+            "ui-visual-verification"
+          ]
+        },
+        {
+          "name": "神机 - 运维工程师",
+          "description": "基础设施与生产可靠性：交付流水线、部署拓扑、状态服务、可观测性、成本与灾备",
+          "instructions_file": "agents/shenji.md",
+          "model": "deepseek-flash",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "pragmatic-implementation",
+            "sre-reliability-playbook"
+          ]
+        },
+        {
+          "name": "慧眼 - 数据参谋",
+          "description": "市场分析、用户行为、收入指标、竞品监控、数据驱动决策",
+          "instructions_file": "agents/huiyan.md",
+          "model": "",
+          "max_concurrent_tasks": 3,
+          "permission": "private",
+          "skills": [
+            "competitive-research",
+            "data-driven-decision-framework"
+          ]
+        },
+        {
+          "name": "海瑞 - 质量审计官",
+          "description": "全项目质量审计：风险扫描、分层抽样验证、基线建立、分级问题报告",
+          "instructions_file": "agents/hairui.md",
+          "model": "deepseek/deepseek-flash",
+          "max_concurrent_tasks": 2,
+          "permission": "workspace",
+          "skills": [
+            "debugging-playbook",
+            "project-audit-playbook",
+            "regression-and-flaky-test-strategy",
+            "security-audit-checklist",
+            "software-design-principles",
+            "test-design-techniques"
+          ]
+        },
+        {
+          "name": "萧何 - 交付推进官",
+          "description": "推进 in_review / in_progress 的交付门禁，并对 todo / backlog 做就绪分诊：能开工派 agent，不能开工标 blocked。",
+          "instructions_file": "agents/xiaohe.md",
+          "model": "deepseek/deepseek-flash",
+          "max_concurrent_tasks": 1,
+          "permission": "workspace",
+          "skills": [
+            "delivery-gate-playbook",
+            "gh-skill"
+          ]
+        },
+        {
+          "name": "范蠡 - 市场增长官",
+          "description": "定位与信息架构、内容与 SEO、社区与社交发布、冷启动外联、渠道复盘；可对外发布，但每批需创始人批准",
+          "instructions_file": "agents/fanli.md",
+          "model": "deepseek-v4-pro",
+          "max_concurrent_tasks": 2,
+          "permission": "private",
+          "skills": [
+            "cold-outreach-playbook",
+            "community-and-social-publishing",
+            "competitive-research",
+            "content-seo-engine",
+            "data-driven-decision-framework",
+            "go-to-market-playbook"
+          ]
+        }
+      ],
+      "squads": [
+        {
+          "name": "独立开发团队",
+          "description": "互联网独立开发一人公司的全栈 Agent 团队：挖掘机会 → 产品设计 → 开发交付 → 上线增长 → 数据复盘，覆盖全流程",
+          "instructions": "",
+          "leader": "孔明 - 项目总协调",
+          "members": [
+            {
+              "name": "孔明 - 项目总协调",
+              "role": "leader"
+            },
+            {
+              "name": "巧匠 - 产品设计 & 增长",
+              "role": "member"
+            },
+            {
+              "name": "包公 - 质量工程师",
+              "role": "member"
+            },
+            {
+              "name": "慧眼 - 数据参谋",
+              "role": "member"
+            },
+            {
+              "name": "鲁班 - 首席架构师",
+              "role": "member"
+            },
+            {
+              "name": "墨子 - 全栈工程师",
+              "role": "member"
+            },
+            {
+              "name": "神机 - 运维工程师",
+              "role": "member"
+            }
+          ],
+          "workflow": {
+            "auto_finalize_parent": false,
+            "auto_promote_stage": false,
+            "child_completion_signal": "terminal_only",
+            "human_approval_required": true,
+            "max_active_children": 0,
+            "merge_mode": "human",
+            "mode": "staged",
+            "require_merge": false,
+            "require_review": true,
+            "require_tests": true
+          }
+        }
+      ],
+      "autopilots": [
+        {
+          "title": "夜间交付推进巡检",
+          "description": "你是交付推进官。执行一次全工作区夜间巡检。\n\n目标：把 `in_review` 和有 PR 的 `in_progress` 推进到 `done`；对 `todo` / `backlog` 做就绪分诊，能开工就派合适 agent 启动，不能开工就写清缺失项并标 `blocked`。\n\n步骤：\n\n1. 加载 `delivery-gate-playbook` 技能。先做五类哨兵查询（`in_review` / `in_progress` / `todo` / `backlog` / `delivery_state=fixing`，各 `--limit 1`）；全空立即静默结束，不再执行其他命令。\n2. 按顺序处理非空类别，每个类别最多 2 个 issue：\n   - `in_review`：送包公复核，按判定返工/合并/完成。\n   - `in_progress`：有 PR 的走同一套最终门禁；PR 已合并的直接对账标完成；无 PR 的按停滞规则处理。\n   - `todo` / `backlog`：按保守就绪标准分诊；ready 就派 agent 并启动，不 ready 就标 `blocked`。\n   - `delivery_state=fixing`：兜底检查停滞和 sha 变化。\n3. 先看 metadata：`delivery_state=escalated` 或 `delivery_next_action_at` 未到就跳过；同一动作不重复评论。\n4. 每个 issue 只推进到「派发下一步」为止，不等待包公跑完。\n5. 有动作才在 issue 上留评论；没有新证据就静默结束，不新建 issue，无动作时最终输出不超过一行。\n\n硬约束：\n\n- 只有包公 `DELIVERY-VERDICT: PASS`、CI 全绿、且 PR 可合并时，才执行 `gh pr merge`。\n- FAIL 打回负责人；同一 issue 累计 3 次打回后标 `blocked` 并用 `@all` 升级。\n- 分诊有疑问按 `blocked`，但必须写清缺哪一项、补什么；不覆盖已有 member 负责人。\n- 不写代码、不 force push、不直接 push main、不改包公结论。",
+          "agent": "萧何 - 交付推进官",
+          "mode": "run_only",
+          "triggers": [
+            {
+              "cron": "30,50 0 * * *",
+              "timezone": "Asia/Shanghai",
+              "label": "低谷 00:30/00:50"
+            },
+            {
+              "cron": "10,30,50 1-7 * * *",
+              "timezone": "Asia/Shanghai",
+              "label": "低谷 01:10-07:50 每20分钟"
+            },
+            {
+              "cron": "10,30 8 * * *",
+              "timezone": "Asia/Shanghai",
+              "label": "低谷 08:10/08:30"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
