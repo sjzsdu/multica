@@ -428,6 +428,26 @@ describe("envWithLocalBins", () => {
   });
 });
 
+describe("electron-builder package manager detection", () => {
+  it("declares the workspace pnpm version in the Desktop package", () => {
+    const desktopRoot = [
+      process.cwd(),
+      resolve(process.cwd(), "apps/desktop"),
+    ].find((candidate) => existsSync(resolve(candidate, "electron-builder.yml")));
+    expect(desktopRoot, "Desktop package root not found").toBeTruthy();
+
+    const desktopPackage = JSON.parse(
+      readFileSync(resolve(desktopRoot, "package.json"), "utf-8"),
+    );
+    const rootPackage = JSON.parse(
+      readFileSync(resolve(desktopRoot, "../../package.json"), "utf-8"),
+    );
+
+    expect(desktopPackage.packageManager).toBe(rootPackage.packageManager);
+    expect(desktopPackage.packageManager).toMatch(/^pnpm@/);
+  });
+});
+
 describe("electron-builder.yml packaging config", () => {
   // Regression guard for github.com/multica-ai/multica/issues/5595. The
   // multi-arch release build writes each target's output to

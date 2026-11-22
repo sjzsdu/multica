@@ -16,6 +16,7 @@
   },
   "license": "SEE LICENSE IN ../../LICENSE",
   "main": "./out/main/index.js",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "bundle-cli": "node scripts/bundle-cli.mjs",
     "bundle-voice-engine": "node scripts/bundle-voice-engine.mjs",
