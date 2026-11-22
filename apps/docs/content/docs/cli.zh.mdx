@@ -483,6 +483,8 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `delete <id>...` | 永久删除一条或多条任务 | `--yes` 跳过确认；接受任务编号或完整 UUID; `--dry-run` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | 修改状态 | `--no-start`、`--duplicate-of` |
+| | `review <id> <approve\|reject>` | 记录独立评审；仅当前运行配置的评审智能体可调用 | `--run`、`--round`；`reject` 时 `--reason` 必填 |
+| | `verdict <id> <accept\|reject>` | 记录产品 pipeline verdict | `--round`；`reject` 时 `--reason` 必填 |
 | | `reorder <id>` | 在列内移动 | |
 | | `search <query>` | 搜索任务 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | 按阶段分组列出子任务 | |
@@ -534,7 +536,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `search <query>` | 搜索 skill | |
 | | `files list/upsert/delete <skill-id>` | 管理 skill 内的文件 | |
 | | `label list/add/remove <skill-id>` | 管理 skill 上的标签 | `add` / `remove`：`<label-id>` 可使用完整 UUID 或短前缀 |
-| `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | |
+| `squad` | `list/get/create/update/delete` | 管理小队（`delete` 为归档） | `update`：流程：`--workflow-mode`、`--child-completion-signal`、`--max-active-children`；自动推进：`--auto-promote-stage`、`--auto-finalize-parent`；gates：`--require-tests`、`--require-review`、`--require-merge`、`--merge-mode`、`--human-approval-required`、`--final-gates-only`；pipeline：`--review-agent`、`--require-pipeline-verdict`、`--pipeline-max-rounds`、`--pipeline-product-agent` |
 | | `member list/add/set-role/remove` | 管理小队成员 | |
 | | `activity <issue-id> <outcome>` | 记录队长评价 | |
 | `chat` | `history`、`thread [id]` | 读取智能体当前正在处理的外部聊天会话 | `--limit`、`--before` |
@@ -547,6 +549,8 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `unarchive <id>...` | 恢复已归档的通知 | |
 | | `snooze <id>...` | 让通知所在任务暂时离开收件箱，直到指定时间 | `--until`（RFC 3339、`30m`、`3h`、`1d`、`1w`、`tomorrow`） |
 | | `unsnooze <id>...` | 让稍后提醒的任务立即回到收件箱 | |
+
+`final_gates_only`、`review_agent_id` 和 `require_pipeline_verdict` 均为显式 opt-in，缺省保持 legacy 行为。`--review-agent` 接受名称或 UUID，空串可清除；固定 reviewer 要求 `--require-review`，且 reviewer 必须与 pipeline product 不同。`--require-pipeline-verdict` 要求 `--pipeline-product-agent`。
 
 ### Runtime
 

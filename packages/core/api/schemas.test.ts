@@ -61,6 +61,8 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadSchema,
+  SquadWorkflowApprovalSchema,
+  EMPTY_SQUAD,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -1162,7 +1164,7 @@ describe("UserSchema star prompt drift", () => {
   });
 });
 
-describe("SquadListSchema member preview drift", () => {
+describe("Squad schema response drift", () => {
   const baseSquad = {
     id: "squad-1",
     workspace_id: "ws-1",
@@ -1204,6 +1206,116 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_count).toBe(2);
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
+  });
+
+  const legacyWorkflow = {
+    mode: "delivery",
+    max_active_children: 1,
+    child_completion_signal: "review_ready",
+    auto_promote_stage: true,
+    auto_finalize_parent: true,
+    require_tests: true,
+    require_review: true,
+    require_merge: true,
+    merge_mode: "integrator",
+    human_approval_required: false,
+  };
+
+  it("keeps omitted workflow defaults in sync with EMPTY_SQUAD", () => {
+    const expectedWorkflow = {
+      mode: "manual",
+      max_active_children: 0,
+      child_completion_signal: "terminal_only",
+      auto_promote_stage: false,
+      auto_finalize_parent: false,
+      require_tests: false,
+      require_review: false,
+      require_merge: false,
+      merge_mode: "human",
+      human_approval_required: true,
+      final_gates_only: false,
+      review_agent_id: "",
+      require_pipeline_verdict: false,
+      pipeline: null,
+    };
+
+    expect(SquadSchema.parse(baseSquad).workflow).toEqual(expectedWorkflow);
+    expect(EMPTY_SQUAD.workflow).toEqual(expectedWorkflow);
+  });
+
+  it("defaults additive fields when an older backend omits them from workflow", () => {
+    const parsed = SquadSchema.parse({ ...baseSquad, workflow: legacyWorkflow });
+
+    expect(parsed.workflow).toEqual({
+      ...legacyWorkflow,
+      final_gates_only: false,
+      review_agent_id: "",
+      require_pipeline_verdict: false,
+      pipeline: null,
+    });
+  });
+
+  it("preserves a complete blackbox workflow policy", () => {
+    const workflow = {
+      ...legacyWorkflow,
+      final_gates_only: true,
+      review_agent_id: "11111111-1111-4111-8111-111111111111",
+      require_pipeline_verdict: true,
+      pipeline: {
+        max_rounds: 3,
+        product_agent_id: "22222222-2222-4222-8222-222222222222",
+      },
+    };
+
+    expect(SquadSchema.parse({ ...baseSquad, workflow }).workflow).toEqual(workflow);
+  });
+
+  it("defaults product_agent_id for a legacy pipeline that allows any squad member", () => {
+    const parsed = SquadSchema.parse({
+      ...baseSquad,
+      workflow: { ...legacyWorkflow, pipeline: { max_rounds: 2 } },
+    });
+
+    expect(parsed.workflow?.pipeline).toEqual({ max_rounds: 2, product_agent_id: "" });
+  });
+
+  it.each([
+    "invalid",
+    {},
+    { max_rounds: 0 },
+    { max_rounds: 1.5 },
+    { max_rounds: 2, product_agent_id: 7 },
+  ])("falls back to null for malformed pipeline %j", (pipeline) => {
+    const parsed = SquadSchema.parse({
+      ...baseSquad,
+      workflow: { ...legacyWorkflow, pipeline },
+    });
+
+    expect(parsed.workflow?.pipeline).toBeNull();
+  });
+
+  const baseApproval = {
+    id: "approval-1",
+    closed_stage: 2,
+    gate: "review",
+    approved: true,
+    approved_by_type: "agent",
+    approved_by_id: "agent-reviewer",
+    approved_at: "2026-05-01T00:00:00Z",
+  };
+
+  it("defaults pipeline_round for a legacy approval", () => {
+    expect(SquadWorkflowApprovalSchema.parse(baseApproval).pipeline_round).toBe(0);
+  });
+
+  it("preserves the round on a complete approval response", () => {
+    expect(SquadWorkflowApprovalSchema.parse({ ...baseApproval, pipeline_round: 2 }).pipeline_round).toBe(2);
+  });
+
+  it.each(["2", -1, 1.5, null])("falls back to round zero for malformed pipeline_round %j", (pipelineRound) => {
+    const parsed = SquadWorkflowApprovalSchema.parse({ ...baseApproval, pipeline_round: pipelineRound });
+
+    expect(parsed.pipeline_round).toBe(0);
   });
 });
 

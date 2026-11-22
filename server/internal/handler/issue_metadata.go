@@ -181,6 +181,15 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := h.checkPipelineMetadataMutation(r, issue, key); err != nil {
+		if errors.Is(err, errPipelineMetadataProtected) {
+			writeError(w, http.StatusForbidden, err.Error())
+		} else {
+			slog.Error("pipeline metadata guard failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate pipeline metadata")
+		}
+		return
+	}
 
 	// Enforce the key-count cap in the handler. The DB only guards size,
 	// and a clear 4xx for "too many keys" beats a CHECK violation that
@@ -264,6 +273,15 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
+		return
+	}
+	if err := h.checkPipelineMetadataMutation(r, issue, key); err != nil {
+		if errors.Is(err, errPipelineMetadataProtected) {
+			writeError(w, http.StatusForbidden, err.Error())
+		} else {
+			slog.Error("pipeline metadata guard failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID, "key", key)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate pipeline metadata")
+		}
 		return
 	}
 

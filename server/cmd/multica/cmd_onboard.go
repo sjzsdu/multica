@@ -3,20 +3,26 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/presets"
+	"github.com/multica-ai/multica/server/internal/squadworkflow"
 )
+
+var loadOnboardCatalog = presets.Load
 
 var onboardCmd = &cobra.Command{
 	Use:   "onboard",
@@ -56,7 +62,7 @@ func runOnboard(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	catalog, err := presets.Load()
+	catalog, err := loadOnboardCatalog()
 	if err != nil {
 		return err
 	}
@@ -64,18 +70,6 @@ func runOnboard(cmd *cobra.Command, _ []string) error {
 		printPresetCatalog(catalog)
 		return nil
 	}
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	workspaceID, err := requireWorkspaceID(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
 
 	prompt := &onboardPrompt{in: bufio.NewReader(os.Stdin)}
 	all, _ := cmd.Flags().GetBool("all")
@@ -97,6 +91,33 @@ func runOnboard(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	skillDefs := collectSkills(selectedPresets)
+	if dryRun {
+		if err := validateOnboardSelection(selection, skillDefs, symbolicOnboardAgentIDs(selection.agents)); err != nil {
+			return fmt.Errorf("validate onboarding selection: %w", err)
+		}
+		runner := &onboardRunner{
+			skillIDs: map[string]string{}, agentIDs: map[string]string{},
+			squadIDs: map[string]string{}, autopilotIDs: map[string]string{}, skillDefs: skillDefs,
+		}
+		fmt.Fprintln(os.Stderr, "\nRuntime: dry run (no runtime lookup)")
+		runner.printPlan(selection)
+		fmt.Fprintln(os.Stderr, "\nDry run: existing resources were not queried; plan counts show all items as new.")
+		fmt.Fprintln(os.Stderr, "Dry run: nothing was created.")
+		return nil
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	workspaceID, err := requireWorkspaceID(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
 	runtimeID, runtimeLabel, err := chooseRuntime(cmd, client, ctx, prompt, yes)
 	if err != nil {
 		return err
@@ -113,16 +134,24 @@ func runOnboard(cmd *cobra.Command, _ []string) error {
 		squadIDs:      map[string]string{},
 		autopilotIDs:  map[string]string{},
 		createdInRun:  map[string]bool{},
-		skillDefs:     collectSkills(selectedPresets),
+		skillDefs:     skillDefs,
 	}
 	if err := runner.loadExisting(selection); err != nil {
 		return err
+	}
+	// Reused agents have real IDs; selected agents not created yet need symbolic IDs for policy validation.
+	validationAgentIDs := symbolicOnboardAgentIDs(selection.agents)
+	for name, id := range runner.agentIDs {
+		validationAgentIDs[name] = id
+	}
+	if err := validateOnboardSelection(selection, skillDefs, validationAgentIDs); err != nil {
+		return fmt.Errorf("validate onboarding selection: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "\nRuntime: %s\n", runtimeLabel)
 	runner.printPlan(selection)
 
-	if !dryRun && !yes {
+	if !yes {
 		ok, err := prompt.confirm("\nProceed? [Y/n] ", true)
 		if err != nil {
 			return err
@@ -131,10 +160,6 @@ func runOnboard(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintln(os.Stderr, "Aborted.")
 			return nil
 		}
-	}
-	if dryRun {
-		fmt.Fprintln(os.Stderr, "\nDry run: nothing was created.")
-		return nil
 	}
 
 	runner.install(selection)
@@ -172,9 +197,6 @@ type onboardSelection struct {
 }
 
 func choosePresets(cmd *cobra.Command, catalog presets.Catalog, prompt *onboardPrompt, all bool) ([]presets.Preset, error) {
-	if all {
-		return catalog.Presets, nil
-	}
 	if spec := mustFlag(cmd, "preset"); spec != "" {
 		var chosen []presets.Preset
 		for _, id := range strings.Split(spec, ",") {
@@ -192,6 +214,9 @@ func choosePresets(cmd *cobra.Command, catalog presets.Catalog, prompt *onboardP
 			return nil, errors.New("--preset did not name any preset")
 		}
 		return chosen, nil
+	}
+	if all {
+		return catalog.Presets, nil
 	}
 
 	if len(catalog.Presets) == 1 {
@@ -677,6 +702,100 @@ func collectSkills(chosen []presets.Preset) map[string]presets.Skill {
 	return skills
 }
 
+var onboardAgentIDPlaceholder = regexp.MustCompile(`^\{\{agent-id:([^{}]+)\}\}$`)
+
+func symbolicOnboardAgentIDs(agents []presets.Agent) map[string]string {
+	ids := make(map[string]string, len(agents))
+	for _, agent := range agents {
+		ids[agent.Name] = uuid.NewSHA1(uuid.NameSpaceOID, []byte("multica/onboard/agent/"+agent.Name)).String()
+	}
+	return ids
+}
+
+func resolveOnboardWorkflowAgentIDs(workflow map[string]any, agentIDs map[string]string) (map[string]any, error) {
+	var resolve func(any) (any, error)
+	resolve = func(value any) (any, error) {
+		switch typed := value.(type) {
+		case string:
+			match := onboardAgentIDPlaceholder.FindStringSubmatch(typed)
+			if match == nil {
+				return typed, nil
+			}
+			id, ok := agentIDs[match[1]]
+			if !ok || id == "" {
+				return nil, fmt.Errorf("workflow references unknown agent %q", match[1])
+			}
+			return id, nil
+		case map[string]any:
+			resolved := make(map[string]any, len(typed))
+			for key, item := range typed {
+				value, err := resolve(item)
+				if err != nil {
+					return nil, err
+				}
+				resolved[key] = value
+			}
+			return resolved, nil
+		case []any:
+			resolved := make([]any, len(typed))
+			for i, item := range typed {
+				value, err := resolve(item)
+				if err != nil {
+					return nil, err
+				}
+				resolved[i] = value
+			}
+			return resolved, nil
+		default:
+			return value, nil
+		}
+	}
+	resolved, err := resolve(workflow)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.(map[string]any), nil
+}
+
+func validateOnboardSelection(selection onboardSelection, skillDefs map[string]presets.Skill, agentIDs map[string]string) error {
+	for _, agent := range selection.agents {
+		for _, name := range agent.Skills {
+			if _, ok := skillDefs[name]; !ok {
+				return fmt.Errorf("agent %q references missing skill %q", agent.Name, name)
+			}
+		}
+	}
+	for _, squad := range selection.squads {
+		for _, name := range squadAgentNames(squad) {
+			if _, ok := agentIDs[name]; !ok {
+				return fmt.Errorf("squad %q references missing agent %q", squad.Name, name)
+			}
+		}
+		if len(squad.Workflow) == 0 {
+			continue
+		}
+		workflow, err := resolveOnboardWorkflowAgentIDs(squad.Workflow, agentIDs)
+		if err != nil {
+			return fmt.Errorf("squad %q: %w", squad.Name, err)
+		}
+		raw, err := json.Marshal(workflow)
+		if err != nil {
+			return fmt.Errorf("squad %q workflow: %w", squad.Name, err)
+		}
+		if _, err := squadworkflow.Parse(raw); err != nil {
+			return fmt.Errorf("squad %q workflow: %w", squad.Name, err)
+		}
+	}
+	for _, autopilot := range selection.autopilots {
+		if autopilot.Agent != "" {
+			if _, ok := agentIDs[autopilot.Agent]; !ok {
+				return fmt.Errorf("autopilot %q references missing agent %q", autopilot.Title, autopilot.Agent)
+			}
+		}
+	}
+	return nil
+}
+
 func (r *onboardRunner) ensureAgent(agent presets.Agent) {
 	if id, ok := r.agentIDs[agent.Name]; ok {
 		r.notes = append(r.notes, fmt.Sprintf("agent %q already exists (%s), left unchanged", agent.Name, id))
@@ -812,7 +931,13 @@ func (r *onboardRunner) ensureSquad(squad presets.Squad) {
 		body["description"] = squad.Description
 	}
 	if len(squad.Workflow) > 0 {
-		body["workflow"] = squad.Workflow
+		workflow, err := resolveOnboardWorkflowAgentIDs(squad.Workflow, r.agentIDs)
+		if err != nil {
+			r.failures = append(r.failures, fmt.Sprintf("squad %q workflow: %v", squad.Name, err))
+			fmt.Fprintf(os.Stderr, "  ! %s: invalid workflow\n", squad.Name)
+			return
+		}
+		body["workflow"] = workflow
 	}
 
 	var result map[string]any

@@ -475,6 +475,8 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `delete <id>...` | 하나 이상의 태스크를 영구 삭제 | `--yes`로 확인 생략. 태스크 번호 또는 전체 UUID 사용; `--dry-run` |
 | | `assign <id>` | 할당 또는 할당 해제 | `--to`(이름으로 멤버, 에이전트, 스쿼드 fuzzy match), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | 상태 변경 | `--no-start`, `--duplicate-of` |
+| | `review <id> <approve\|reject>` | 독립 리뷰 기록. 현재 실행에 구성된 리뷰 에이전트만 호출 가능 | `--run`, `--round`. `reject`에는 `--reason` 필수 |
+| | `verdict <id> <accept\|reject>` | 제품 pipeline verdict 기록 | `--round`. `reject`에는 `--reason` 필수 |
 | | `reorder <id>` | 열 안에서 이동 | |
 | | `search <query>` | 태스크 검색 | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | 단계별로 묶은 하위 태스크 목록 | |
@@ -522,7 +524,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `search <query>` | 스킬 검색 | |
 | | `files list/upsert/delete <skill-id>` | 스킬 내부 파일 관리 | |
 | | `label list/add/remove <skill-id>` | 스킬 라벨 관리 | `add` / `remove`: `<label-id>`에 전체 UUID 또는 짧은 접두사 사용 가능 |
-| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | |
+| `squad` | `list/get/create/update/delete` | 스쿼드 관리(`delete`는 보관) | `update` — 흐름: `--workflow-mode`, `--child-completion-signal`, `--max-active-children`. 자동 진행: `--auto-promote-stage`, `--auto-finalize-parent`. gate: `--require-tests`, `--require-review`, `--require-merge`, `--merge-mode`, `--human-approval-required`, `--final-gates-only`. pipeline: `--review-agent`, `--require-pipeline-verdict`, `--pipeline-max-rounds`, `--pipeline-product-agent` |
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
@@ -535,6 +537,8 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `unarchive <id>...` | 보관한 알림 복원 | |
 | | `snooze <id>...` | 알림의 태스크를 지정한 시간까지 인박스에서 빼기 | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
 | | `unsnooze <id>...` | 다시 알림 중인 태스크를 지금 되돌리기 | |
+
+`final_gates_only`, `review_agent_id`, `require_pipeline_verdict`는 명시적 opt-in이며, 설정하지 않으면 기존 동작을 유지합니다. `--review-agent`는 에이전트 이름 또는 UUID를 받고 빈 문자열로 해제할 수 있습니다. 고정 리뷰어에는 `--require-review`가 필요하며 pipeline 제품 역할과 달라야 합니다. `--require-pipeline-verdict`에는 `--pipeline-product-agent`가 필요합니다.
 
 ### Runtime
 

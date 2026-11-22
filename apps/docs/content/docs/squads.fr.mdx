@@ -36,7 +36,7 @@ Lorsqu'une tâche qui n'est pas dans À planifier est assignée à un squad, Mul
 3. **Le chef publie un commentaire de délégation.** Le commentaire mentionne avec `@` le ou les membres choisis, en reprenant exactement le markdown de mention fourni par le roster. Chaque agent mentionné reçoit une nouvelle exécution, et chaque membre humain mentionné reçoit une notification.
 4. **Le chef consigne son évaluation** via `multica squad activity <issue-id> action --reason "..."`. Cela ajoute une entrée dans la chronologie d'activité de la tâche, afin que les humains voient que le chef a bien évalué le déclencheur.
 5. **Le tour de répartition laisse la tâche parente en `in_progress`.** Même contrat de statut géré par l'agent que pour une assignation directe à un agent — coordonner le squad revient à traiter la demande de la tâche parente, qui passe donc de `todo` à `in_progress` ; répartir le travail entre les membres n'est pas une livraison, donc elle y reste pendant que le squad travaille.
-6. **Le chef s'arrête.** Le chef ne réalise pas lui-même l'implémentation. Lorsque le membre délégué publie un retour — ou lorsqu'une sous-tâche ou une barrière d'étape se ferme — le chef est redéclenché pour lire la mise à jour et, au choix, déléguer l'étape suivante, escalader, passer la tâche parente en `in_review` une fois l'objectif global atteint, ou rester silencieux. `done` est laissé à un relecteur humain ou aux intégrations existantes (par exemple une PR avec intention de fermeture qui est fusionnée).
+6. **Le chef s'arrête.** Le chef ne réalise pas lui-même l'implémentation. Lorsque le membre délégué publie un retour — ou lorsqu'une sous-tâche ou une barrière d'étape se ferme — le chef est redéclenché pour lire la mise à jour et, au choix, déléguer l'étape suivante, escalader, passer la tâche parente en `in_review` une fois l'objectif global atteint, ou rester silencieux. Par défaut, `done` est laissé à un relecteur humain ou aux intégrations existantes (par exemple une PR avec intention de fermeture qui est fusionnée). L'exception est un `accept` produit autorisé dans un pipeline avec verdict obligatoire explicitement activé.
 
 Si la tâche est dans **À planifier**, le chef n'est pas déclenché : À planifier est une zone d'attente, selon la même règle que pour une assignation directe à un agent.
 
@@ -53,6 +53,29 @@ La démo ci-dessous confie une tâche de préparation d'événement au Squad év
   La partie de ce protocole consacrée au statut **ne s'applique qu'aux tâches effectivement assignées à ce squad**. Un chef réveillé par une mention `@squad` sur la tâche de quelqu'un d'autre reçoit le même roster et les mêmes règles de délégation, mais il lui est explicitement indiqué de **ne pas** toucher au statut de cette tâche — le statut reste du ressort de l'assigné de la tâche.
 - **Squad Roster** — la ligne du chef lui-même, plus une ligne par membre non archivé. Chaque ligne contient exactement le markdown de mention (`[@Name](mention://agent/<uuid>)` ou `[@Name](mention://member/<uuid>)`) que le chef doit coller — taper un simple `@name` ne déclenche personne.
 - **Squad Instructions** — vos consignes personnalisées pour ce squad (définies sur la page de détail du squad ou via `multica squad update --instructions`). Utilisez-les pour les règles de routage (« confier le travail de base de données à Alice, le frontend à Bob »), les politiques d'escalade ou tout ce que le chef doit savoir et qui ne figure pas déjà dans la tâche.
+
+## Livraison produit en boîte noire
+
+Installez le preset, qui crée ou réutilise le squad `黑盒产品交付团队` :
+
+```bash
+multica onboard --preset solo-company-blackbox
+```
+
+Créez une tâche parente décrivant votre idée et assignez-la à ce squad. Le travail ne démarre que si la tâche n'est pas dans `backlog`. Le déroulement est : définition du produit → architecture → implémentation → prévalidation du déploiement → révision indépendante → intégration/déploiement → acceptation produit. Le preset exécute une seule sous-tâche active à la fois, avec 包公 comme réviseur indépendant fixe et 管仲 dans le rôle produit.
+
+La CI, l'approbation du réviseur indépendant, la fusion de la PR, les preuves de déploiement et le verdict produit doivent constituer des preuves persistantes vérifiables par le serveur. Les commentaires PASS/FAIL sont seulement explicatifs et ne remplacent ni une approbation ni un gate ; les agents ne peuvent pas marquer directement la tâche `done` ni écrire des métadonnées de pipeline pour les contourner. Les étapes intermédiaires ignorent les gates finaux, tandis que l'étape finale exige des preuves complètes.
+
+Seul l'agent de révision configuré sur l'exécution courante peut utiliser review. Le rôle produit enregistre le verdict :
+
+```bash
+multica issue review <issue-id> <approve|reject> --run <run-id> --round <n> [--reason <text>]
+multica issue verdict <issue-id> <accept|reject> --round <n> [--reason <text>]
+```
+
+Un rejet exige `--reason`. `--round` doit correspondre au `pipeline_round` actuel ; un tour absent ou obsolète renvoie 409, ne consomme aucun tour et ne redéclenche pas de dispatch. L'`accept` produit revérifie tous les gates, puis termine la tâche et enregistre `accepted` de façon atomique.
+
+Les trois premiers rejets peuvent lancer une reprise. Le rejet suivant enregistre `escalated` et arrête les dispatches automatiques. Seul un membre humain réel de l'espace de travail peut ensuite prendre le relais et terminer manuellement la tâche ; les identifiants machine ne comptent pas. Une terminaison manuelle conserve `escalated` au lieu d'enregistrer `accepted`.
 
 ## Règles de redéclenchement du chef
 

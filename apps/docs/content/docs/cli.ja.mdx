@@ -475,6 +475,8 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | ステータスを変更 | `--no-start`、`--duplicate-of` |
+| | `review <id> <approve\|reject>` | 独立レビューを記録。現在の実行に設定されたレビュアーのみ呼び出し可能 | `--run`、`--round`。`reject` では `--reason` が必須 |
+| | `verdict <id> <accept\|reject>` | プロダクトの pipeline verdict を記録 | `--round`。`reject` では `--reason` が必須 |
 | | `reorder <id>` | カラム内で移動 | |
 | | `search <query>` | タスクを検索 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | サブタスクをステージごとに一覧 | |
@@ -522,7 +524,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `search <query>` | スキルを検索 | |
 | | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | |
 | | `label list/add/remove <skill-id>` | スキルのラベルを管理 | `add` / `remove`: `<label-id>` は完全な UUID または短いプレフィックス |
-| `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
+| `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | `update` — フロー: `--workflow-mode`、`--child-completion-signal`、`--max-active-children`。自動進行: `--auto-promote-stage`、`--auto-finalize-parent`。ゲート: `--require-tests`、`--require-review`、`--require-merge`、`--merge-mode`、`--human-approval-required`、`--final-gates-only`。pipeline: `--review-agent`、`--require-pipeline-verdict`、`--pipeline-max-rounds`、`--pipeline-product-agent` |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
@@ -535,6 +537,8 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `unarchive <id>...` | アーカイブした通知を復元する | |
 | | `snooze <id>...` | 通知のタスクを指定時刻までインボックスから外す | `--until`（RFC 3339、`30m`、`3h`、`1d`、`1w`、`tomorrow`） |
 | | `unsnooze <id>...` | スヌーズ中のタスクをすぐに戻す | |
+
+`final_gates_only`、`review_agent_id`、`require_pipeline_verdict` は明示的な opt-in で、未設定の場合は従来の動作を維持します。`--review-agent` はエージェント名または UUID を受け付け、空文字列で解除できます。固定レビュアーには `--require-review` が必要で、pipeline のプロダクト役とは別のエージェントを指定します。`--require-pipeline-verdict` には `--pipeline-product-agent` が必要です。
 
 ### Runtime
 

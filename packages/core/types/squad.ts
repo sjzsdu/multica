@@ -15,6 +15,13 @@ export interface SquadWorkflowPolicy {
   require_merge: boolean;
   merge_mode: SquadWorkflowMergeMode;
   human_approval_required: boolean;
+  final_gates_only: boolean;
+  review_agent_id: string;
+  require_pipeline_verdict: boolean;
+  pipeline: {
+    max_rounds: number;
+    product_agent_id: string;
+  } | null;
 }
 
 export type SquadWorkflowGate = "tests" | "review" | "merge" | "human_approval";
@@ -22,6 +29,7 @@ export type SquadWorkflowGate = "tests" | "review" | "merge" | "human_approval";
 export interface SquadWorkflowApproval {
   id: string;
   closed_stage: number;
+  pipeline_round: number;
   gate: SquadWorkflowGate;
   approved: boolean;
   approved_by_type: string;

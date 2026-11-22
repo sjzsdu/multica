@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getWorkflowAgentDispatchTask = `-- name: GetWorkflowAgentDispatchTask :one
+SELECT id FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND squad_id = $3
+  AND context->>'workflow_dispatch_key' = $4::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetWorkflowAgentDispatchTaskParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	SquadID     pgtype.UUID `json:"squad_id"`
+	DispatchKey string      `json:"dispatch_key"`
+}
+
+// Dispatch keys are durable across terminal states: a worker replay must not
+// create another reviewer, integrator, acceptance, or rework task for the same
+// workflow run and pipeline round.
+func (q *Queries) GetWorkflowAgentDispatchTask(ctx context.Context, arg GetWorkflowAgentDispatchTaskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getWorkflowAgentDispatchTask,
+		arg.IssueID,
+		arg.AgentID,
+		arg.SquadID,
+		arg.DispatchKey,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getWorkflowSquadHandoffTask = `-- name: GetWorkflowSquadHandoffTask :one
 SELECT id FROM agent_task_queue
 WHERE issue_id = $1

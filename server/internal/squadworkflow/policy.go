@@ -57,16 +57,19 @@ type PipelinePolicy struct {
 }
 
 type Policy struct {
-	Mode                  Mode             `json:"mode"`
-	MaxActiveChildren     int              `json:"max_active_children"`
-	ChildCompletionSignal CompletionSignal `json:"child_completion_signal"`
-	AutoPromoteStage      bool             `json:"auto_promote_stage"`
-	AutoFinalizeParent    bool             `json:"auto_finalize_parent"`
-	RequireTests          bool             `json:"require_tests"`
-	RequireReview         bool             `json:"require_review"`
-	RequireMerge          bool             `json:"require_merge"`
-	MergeMode             MergeMode        `json:"merge_mode"`
-	HumanApprovalRequired bool             `json:"human_approval_required"`
+	Mode                   Mode             `json:"mode"`
+	MaxActiveChildren      int              `json:"max_active_children"`
+	ChildCompletionSignal  CompletionSignal `json:"child_completion_signal"`
+	AutoPromoteStage       bool             `json:"auto_promote_stage"`
+	AutoFinalizeParent     bool             `json:"auto_finalize_parent"`
+	RequireTests           bool             `json:"require_tests"`
+	RequireReview          bool             `json:"require_review"`
+	RequireMerge           bool             `json:"require_merge"`
+	MergeMode              MergeMode        `json:"merge_mode"`
+	HumanApprovalRequired  bool             `json:"human_approval_required"`
+	FinalGatesOnly         bool             `json:"final_gates_only"`
+	ReviewAgentID          string           `json:"review_agent_id,omitempty"`
+	RequirePipelineVerdict bool             `json:"require_pipeline_verdict"`
 	// Pipeline is absent (nil) for ordinary squads. omitempty keeps stored
 	// config and briefings free of the block until a pipeline is configured,
 	// and Parse below restores it from stored JSON like every other field.
@@ -102,6 +105,17 @@ func (p Policy) Validate() error {
 	default:
 		return fmt.Errorf("merge_mode must be one of human, integrator, pr_close_intent")
 	}
+	if p.ReviewAgentID != "" {
+		if !p.RequireReview {
+			return fmt.Errorf("review_agent_id requires require_review")
+		}
+		if _, err := util.ParseUUID(p.ReviewAgentID); err != nil {
+			return fmt.Errorf("review_agent_id must be a UUID")
+		}
+	}
+	if p.RequirePipelineVerdict && (p.Pipeline == nil || p.Pipeline.ProductAgentID == "") {
+		return fmt.Errorf("require_pipeline_verdict requires pipeline product_agent_id")
+	}
 	if p.Pipeline != nil {
 		if p.Pipeline.MaxRounds < 1 {
 			return fmt.Errorf("pipeline max_rounds must be >= 1")
@@ -111,8 +125,17 @@ func (p Policy) Validate() error {
 				return fmt.Errorf("pipeline product_agent_id must be a UUID")
 			}
 		}
+		if p.ReviewAgentID != "" && p.ReviewAgentID == p.Pipeline.ProductAgentID {
+			return fmt.Errorf("review_agent_id must differ from pipeline product_agent_id")
+		}
 	}
 	return nil
+}
+
+// DefersFinalGates reports whether a promotion only advances to another stage.
+// Finalization always evaluates the complete evidence contract.
+func (p Policy) DefersFinalGates(nextStage int32) bool {
+	return p.FinalGatesOnly && nextStage > 0
 }
 
 // Parse decodes a stored or API-supplied configuration. An empty value means

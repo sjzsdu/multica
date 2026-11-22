@@ -18,6 +18,18 @@ WHERE issue_id = @issue_id
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 
+-- name: GetWorkflowAgentDispatchTask :one
+-- Dispatch keys are durable across terminal states: a worker replay must not
+-- create another reviewer, integrator, acceptance, or rework task for the same
+-- workflow run and pipeline round.
+SELECT id FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND squad_id = @squad_id
+  AND context->>'workflow_dispatch_key' = sqlc.arg('dispatch_key')::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListAssigneeRunsForHandoff :many
 -- Preview and explicit stop must cover every unfinished run of the previous
 -- assignee, including stage handoffs still waiting for a pending queue slot.

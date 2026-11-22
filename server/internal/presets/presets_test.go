@@ -1,6 +1,7 @@
 package presets
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -89,5 +90,125 @@ func TestResolveMentions(t *testing.T) {
 	}
 	if len(missing) != 1 || missing[0] != "{{agent:不存在}}" {
 		t.Errorf("missing = %v, want one unresolved placeholder", missing)
+	}
+}
+
+func TestResolveReferencesCopiesCompleteSourceDefinitions(t *testing.T) {
+	sourceSkill := Skill{
+		Name: "architecture", Description: "Architecture guidance",
+		File: "skills/architecture.md", Content: "skill body",
+	}
+	sourceAgent := Agent{
+		Name: "Architect", Description: "System architect",
+		InstructionsFile: "agents/architect.md", Instructions: "agent body",
+		Model: "model-a", MaxConcurrentTasks: 2, Permission: "workspace",
+		Skills: []string{"architecture"},
+	}
+	catalog := Catalog{Presets: []Preset{
+		{ID: "source", Skills: []Skill{sourceSkill}, Agents: []Agent{sourceAgent}},
+		{ID: "target",
+			Skills: []Skill{{Ref: "source", Name: "architecture"}},
+			Agents: []Agent{{Ref: "source", Name: "Architect"}},
+		},
+	}}
+
+	if err := resolveReferences(&catalog); err != nil {
+		t.Fatalf("resolveReferences: %v", err)
+	}
+	if got := catalog.Presets[1].Skills[0]; !reflect.DeepEqual(got, sourceSkill) {
+		t.Errorf("resolved skill = %#v, want %#v", got, sourceSkill)
+	}
+	if got := catalog.Presets[1].Agents[0]; !reflect.DeepEqual(got, sourceAgent) {
+		t.Errorf("resolved agent = %#v, want %#v", got, sourceAgent)
+	}
+	if got := catalog.Presets[0].Skills[0]; !reflect.DeepEqual(got, sourceSkill) {
+		t.Errorf("source skill changed: %#v", got)
+	}
+	if got := catalog.Presets[0].Agents[0]; !reflect.DeepEqual(got, sourceAgent) {
+		t.Errorf("source agent changed: %#v", got)
+	}
+}
+
+func TestResolveReferencesRejectsInvalidReferences(t *testing.T) {
+	source := Preset{
+		ID:     "source",
+		Skills: []Skill{{Name: "shared-skill", Content: "skill body"}},
+		Agents: []Agent{{Name: "Shared Agent", Instructions: "agent body"}},
+	}
+	tests := []struct {
+		name    string
+		target  Preset
+		wantErr string
+	}{
+		{
+			name:    "unknown preset",
+			target:  Preset{ID: "target", Skills: []Skill{{Ref: "missing", Name: "shared-skill"}}},
+			wantErr: "unknown",
+		},
+		{
+			name:    "unknown name",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "source", Name: "missing"}}},
+			wantErr: "unknown",
+		},
+		{
+			name:    "self reference",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "target", Name: "Shared Agent"}}},
+			wantErr: "self",
+		},
+		{
+			name:    "preset traversal",
+			target:  Preset{ID: "target", Skills: []Skill{{Ref: "../source", Name: "shared-skill"}}},
+			wantErr: "path",
+		},
+		{
+			name:    "name traversal",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "source", Name: "../Shared Agent"}}},
+			wantErr: "path",
+		},
+		{
+			name:    "skill description override",
+			target:  Preset{ID: "target", Skills: []Skill{{Ref: "source", Name: "shared-skill", Description: "override"}}},
+			wantErr: "only ref and name",
+		},
+		{
+			name:    "skill file override",
+			target:  Preset{ID: "target", Skills: []Skill{{Ref: "source", Name: "shared-skill", File: "skills/other.md"}}},
+			wantErr: "only ref and name",
+		},
+		{
+			name:    "agent model override",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "source", Name: "Shared Agent", Model: "other"}}},
+			wantErr: "only ref and name",
+		},
+		{
+			name:    "agent file override",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "source", Name: "Shared Agent", InstructionsFile: "agents/other.md"}}},
+			wantErr: "only ref and name",
+		},
+		{
+			name:    "agent skills override",
+			target:  Preset{ID: "target", Agents: []Agent{{Ref: "source", Name: "Shared Agent", Skills: []string{"other"}}}},
+			wantErr: "only ref and name",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := Catalog{Presets: []Preset{source, tc.target}}
+			err := resolveReferences(&catalog)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("resolveReferences error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestResolveReferencesRejectsChainedReferences(t *testing.T) {
+	catalog := Catalog{Presets: []Preset{
+		{ID: "source", Agents: []Agent{{Name: "Shared Agent", Instructions: "agent body"}}},
+		{ID: "middle", Agents: []Agent{{Ref: "source", Name: "Shared Agent"}}},
+		{ID: "target", Agents: []Agent{{Ref: "middle", Name: "Shared Agent"}}},
+	}}
+	if err := resolveReferences(&catalog); err == nil || !strings.Contains(err.Error(), "chained") {
+		t.Fatalf("resolveReferences error = %v, want chained reference rejection", err)
 	}
 }

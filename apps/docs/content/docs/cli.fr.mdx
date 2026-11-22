@@ -483,6 +483,8 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `delete <id>...` | Supprimer définitivement une ou plusieurs tâches | `--yes` ignore la confirmation ; accepte les identifiants de tâche ou UUID complets; `--dry-run` |
 | | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Changer le statut | `--no-start`, `--duplicate-of` |
+| | `review <id> <approve\|reject>` | Enregistrer la revue indépendante ; seul l'agent de revue configuré pour l'exécution actuelle peut l'appeler | `--run`, `--round` ; `--reason` est obligatoire pour `reject` |
+| | `verdict <id> <accept\|reject>` | Enregistrer le verdict produit du pipeline | `--round` ; `--reason` est obligatoire pour `reject` |
 | | `reorder <id>` | Déplacer au sein d'une colonne | |
 | | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | Lister les sous-tâches regroupées par étape | |
@@ -530,7 +532,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `search <query>` | Rechercher des skills | |
 | | `files list/upsert/delete <skill-id>` | Gérer les fichiers d'un skill | |
 | | `label list/add/remove <skill-id>` | Gérer les étiquettes d'un skill | `add` / `remove` : `<label-id>` accepte un UUID complet ou un préfixe court |
-| `squad` | `list/get/create/update/delete` | Gérer les squads (`delete` archive) | |
+| `squad` | `list/get/create/update/delete` | Gérer les squads (`delete` archive) | `update` — workflow : `--workflow-mode`, `--child-completion-signal`, `--max-active-children` ; automatisation : `--auto-promote-stage`, `--auto-finalize-parent` ; contrôles : `--require-tests`, `--require-review`, `--require-merge`, `--merge-mode`, `--human-approval-required`, `--final-gates-only` ; pipeline : `--review-agent`, `--require-pipeline-verdict`, `--pipeline-max-rounds`, `--pipeline-product-agent` |
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
@@ -543,6 +545,8 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `unarchive <id>...` | Restaurer des notifications archivées | |
 | | `snooze <id>...` | Retirer la tâche de chaque notification de la boîte de réception jusqu'à une date | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
 | | `unsnooze <id>...` | Faire revenir maintenant des tâches reportées | |
+
+`final_gates_only`, `review_agent_id` et `require_pipeline_verdict` sont des options d'activation explicites ; lorsqu'elles ne sont pas définies, le comportement historique est conservé. `--review-agent` accepte un nom d'agent ou un UUID, et une chaîne vide l'efface. Un reviewer fixe exige `--require-review` et doit être différent de l'agent produit du pipeline. `--require-pipeline-verdict` exige `--pipeline-product-agent`.
 
 ### Runtime
 

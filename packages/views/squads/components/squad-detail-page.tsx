@@ -1339,6 +1339,10 @@ const DEFAULT_SQUAD_WORKFLOW: SquadWorkflowPolicy = {
   require_merge: false,
   merge_mode: "human",
   human_approval_required: true,
+  final_gates_only: false,
+  review_agent_id: "",
+  require_pipeline_verdict: false,
+  pipeline: null,
 };
 
 function SquadWorkflowSection({

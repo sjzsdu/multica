@@ -506,6 +506,8 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `delete <id>...` | Permanently delete one or more issues | `--yes` skips confirmation; accepts issue keys or full UUIDs; `--dry-run` |
 | | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Change status | `--no-start`, `--duplicate-of` |
+| | `review <id> <approve\|reject>` | Record independent review; only the current run's configured review agent may call it | `--run`, `--round`; `--reason` is required for `reject` |
+| | `verdict <id> <accept\|reject>` | Record the product pipeline verdict | `--round`; `--reason` is required for `reject` |
 | | `reorder <id>` | Move within a column | |
 | | `search <query>` | Search issues | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | List sub-issues grouped by stage | |
@@ -557,7 +559,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `search <query>` | Search skills | |
 | | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | |
 | | `label list/add/remove <skill-id>` | Manage labels on a skill | `add` / `remove`: `<label-id>` accepts a full UUID or short prefix |
-| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
+| `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | `update` — workflow: `--workflow-mode`, `--child-completion-signal`, `--max-active-children`; automation: `--auto-promote-stage`, `--auto-finalize-parent`; gates: `--require-tests`, `--require-review`, `--require-merge`, `--merge-mode`, `--human-approval-required`, `--final-gates-only`; pipeline: `--review-agent`, `--require-pipeline-verdict`, `--pipeline-max-rounds`, `--pipeline-product-agent` |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
@@ -570,6 +572,8 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `unarchive <id>...` | Restore archived notifications | |
 | | `snooze <id>...` | Take each notification's issue out of the inbox until a time | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
 | | `unsnooze <id>...` | Bring snoozed issues back now | |
+
+`final_gates_only`, `review_agent_id`, and `require_pipeline_verdict` are explicit opt-ins; leaving them unset preserves legacy behavior. `--review-agent` accepts an agent name or UUID, and an empty string clears it. A fixed reviewer requires `--require-review` and must differ from the pipeline product. `--require-pipeline-verdict` requires `--pipeline-product-agent`.
 
 ### Runtime
 

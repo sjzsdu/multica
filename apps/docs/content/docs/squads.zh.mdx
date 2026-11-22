@@ -36,7 +36,7 @@ import { SquadDemo } from "@/components/demos/squad-demo";
 3. **队长发一条派活评论。** 评论里用花名册给好的 mention markdown `@` 选中的成员。被 `@` 的智能体会入队一次新运行，被 `@` 的人类成员会收到通知。
 4. **队长记录 evaluation**：`multica squad activity <issue-id> <outcome> --reason "..."`。这一行会写进任务的 activity 时间线，方便人类回溯队长的每次评估。
 5. **派活轮让父任务处于 `in_progress`。** 和直接分配给智能体同一套状态约定：协调小队就是在推进父任务本身的工作，所以父任务从 `todo` 进入 `in_progress`；派活不等于交付，小队干活期间保持不变。
-6. **队长停下。** 派完活，队长不亲自动手。被派成员有回复时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、在整体目标达成后把父任务推到 `in_review`，或保持沉默。`done` 留给人工确认或既有集成（例如带 close intent 的 PR merge）。
+6. **队长停下。** 派完活，队长不亲自动手。被派成员有回复时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、在整体目标达成后把父任务推到 `in_review`，或保持沉默。默认情况下，`done` 留给人工确认或既有集成（例如带 close intent 的 PR merge）；显式 opt-in 的 verdict 强制 pipeline 中，授权产品的 `accept` 是例外。
 
 如果任务仍在 `backlog`，分配本身不会触发队长。移出 `backlog` 后才会开始执行。
 
@@ -53,6 +53,29 @@ import { SquadDemo } from "@/components/demos/squad-demo";
  其中状态相关的规则只对"确实分配给本小队"的任务生效。队长被别人任务里的 `@小队` 唤醒时，同样拿到花名册和派活规则，但会被明确告知不要改动那条任务的状态，状态仍归那条任务自己的负责人。
 - **Squad Roster（小队花名册）**：队长一行，加上每个未归档成员一行，每行带可直接复制的 mention markdown（`[@Name](mention://agent/<uuid>)`）。纯文本 `@name` 不会触发任何人。
 - **Squad Instructions（小队指令）**：你为这个小队写的自定义内容，包括路由规则（"数据库相关派给 Alice，前端派给 Bob"）、上报策略，或任务本身不会有的背景。
+
+## 黑盒产品交付
+
+安装 preset，创建或复用"黑盒产品交付团队"小队：
+
+```bash
+multica onboard --preset solo-company-blackbox
+```
+
+创建一个描述想法的父任务并分配给该小队。任务不在 `backlog` 时才会启动。流程为产品定义 → 架构 → 实现 → 部署预验证 → 独立评审 → 集成/部署 → 产品验收。preset 同时只运行一个活跃子任务，固定由包公独立评审、管仲负责产品验收。
+
+CI、独立 reviewer approval、PR merge、部署证据和产品 verdict 必须形成服务端可验证的持久证据。评论中的 PASS/FAIL 只是说明，不能替代 approval 或 gate；智能体也不能直接标记 `done` 或写 pipeline metadata 绕过检查。中间阶段不执行最终 gates，最终阶段必须证据完整。
+
+review 只能由当前运行配置的 reviewer 调用，产品角色使用 verdict：
+
+```bash
+multica issue review <issue-id> <approve|reject> --run <run-id> --round <n> [--reason <text>]
+multica issue verdict <issue-id> <accept|reject> --round <n> [--reason <text>]
+```
+
+reject 必须填写 `--reason`。`--round` 必须等于当前 `pipeline_round`；缺失或过期会返回 409，不消耗轮次，也不重新 dispatch。产品 `accept` 会重新验证全部 gates，再原子完成任务并写入 `accepted`。
+
+前三次 reject 可启动返工；下一次 reject 进入 `escalated` 并停止自动 dispatch。此后只有真实的人类工作区成员才能接管并手动完成，machine credential 不算。人工完成保留 `escalated`，不会写成 `accepted`。
 
 ## 队长的再次触发时机
 

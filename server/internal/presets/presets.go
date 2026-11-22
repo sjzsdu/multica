@@ -39,6 +39,7 @@ type Preset struct {
 // Skill is a workspace skill plus the body read from its file.
 type Skill struct {
 	Name        string `json:"name"`
+	Ref         string `json:"ref,omitempty"`
 	Description string `json:"description"`
 	File        string `json:"file"`
 	Content     string `json:"-"`
@@ -47,6 +48,7 @@ type Skill struct {
 // Agent is an agent definition; Instructions is read from InstructionsFile.
 type Agent struct {
 	Name               string   `json:"name"`
+	Ref                string   `json:"ref,omitempty"`
 	Description        string   `json:"description"`
 	InstructionsFile   string   `json:"instructions_file"`
 	Instructions       string   `json:"-"`
@@ -105,6 +107,9 @@ func Load() (Catalog, error) {
 			return Catalog{}, fmt.Errorf("preset %d: missing id", i)
 		}
 		for j := range preset.Skills {
+			if preset.Skills[j].Ref != "" {
+				continue
+			}
 			content, err := readAsset(preset.ID, preset.Skills[j].File)
 			if err != nil {
 				return Catalog{}, fmt.Errorf("skill %q: %w", preset.Skills[j].Name, err)
@@ -112,6 +117,9 @@ func Load() (Catalog, error) {
 			preset.Skills[j].Content = content
 		}
 		for j := range preset.Agents {
+			if preset.Agents[j].Ref != "" {
+				continue
+			}
 			content, err := readAsset(preset.ID, preset.Agents[j].InstructionsFile)
 			if err != nil {
 				return Catalog{}, fmt.Errorf("agent %q: %w", preset.Agents[j].Name, err)
@@ -119,7 +127,117 @@ func Load() (Catalog, error) {
 			preset.Agents[j].Instructions = content
 		}
 	}
+	if err := resolveReferences(&catalog); err != nil {
+		return Catalog{}, err
+	}
 	return catalog, nil
+}
+
+type referenceKey struct {
+	presetID string
+	name     string
+}
+
+func resolveReferences(catalog *Catalog) error {
+	skills := map[referenceKey]*Skill{}
+	agents := map[referenceKey]*Agent{}
+	for i := range catalog.Presets {
+		preset := &catalog.Presets[i]
+		for j := range preset.Skills {
+			skill := &preset.Skills[j]
+			skills[referenceKey{presetID: preset.ID, name: skill.Name}] = skill
+		}
+		for j := range preset.Agents {
+			agent := &preset.Agents[j]
+			agents[referenceKey{presetID: preset.ID, name: agent.Name}] = agent
+		}
+	}
+
+	// Validate the original graph before copying anything so a resolved reference
+	// cannot make a later chained reference look like a local definition.
+	for i := range catalog.Presets {
+		preset := &catalog.Presets[i]
+		for j := range preset.Skills {
+			skill := &preset.Skills[j]
+			if skill.Ref == "" {
+				continue
+			}
+			if err := validateReferenceLocation("skill", preset.ID, skill.Name, skill.Ref); err != nil {
+				return err
+			}
+			if skill.Description != "" || skill.File != "" || skill.Content != "" {
+				return fmt.Errorf("preset %q skill %q: reference item may set only ref and name", preset.ID, skill.Name)
+			}
+			source, ok := skills[referenceKey{presetID: skill.Ref, name: skill.Name}]
+			if !ok {
+				return fmt.Errorf("preset %q skill %q: unknown reference %q", preset.ID, skill.Name, skill.Ref)
+			}
+			if source == skill {
+				return fmt.Errorf("preset %q skill %q: self reference", preset.ID, skill.Name)
+			}
+			if source.Ref != "" {
+				return fmt.Errorf("preset %q skill %q: chained reference through %q", preset.ID, skill.Name, skill.Ref)
+			}
+		}
+		for j := range preset.Agents {
+			agent := &preset.Agents[j]
+			if agent.Ref == "" {
+				continue
+			}
+			if err := validateReferenceLocation("agent", preset.ID, agent.Name, agent.Ref); err != nil {
+				return err
+			}
+			if agent.Description != "" || agent.InstructionsFile != "" || agent.Instructions != "" ||
+				agent.Model != "" || agent.MaxConcurrentTasks != 0 || agent.Permission != "" || len(agent.Skills) != 0 {
+				return fmt.Errorf("preset %q agent %q: reference item may set only ref and name", preset.ID, agent.Name)
+			}
+			source, ok := agents[referenceKey{presetID: agent.Ref, name: agent.Name}]
+			if !ok {
+				return fmt.Errorf("preset %q agent %q: unknown reference %q", preset.ID, agent.Name, agent.Ref)
+			}
+			if source == agent {
+				return fmt.Errorf("preset %q agent %q: self reference", preset.ID, agent.Name)
+			}
+			if source.Ref != "" {
+				return fmt.Errorf("preset %q agent %q: chained reference through %q", preset.ID, agent.Name, agent.Ref)
+			}
+		}
+	}
+
+	for i := range catalog.Presets {
+		preset := &catalog.Presets[i]
+		for j := range preset.Skills {
+			if preset.Skills[j].Ref == "" {
+				continue
+			}
+			source := skills[referenceKey{presetID: preset.Skills[j].Ref, name: preset.Skills[j].Name}]
+			preset.Skills[j] = *source
+		}
+		for j := range preset.Agents {
+			if preset.Agents[j].Ref == "" {
+				continue
+			}
+			source := agents[referenceKey{presetID: preset.Agents[j].Ref, name: preset.Agents[j].Name}]
+			resolved := *source
+			if source.Skills != nil {
+				resolved.Skills = make([]string, len(source.Skills))
+				copy(resolved.Skills, source.Skills)
+			}
+			preset.Agents[j] = resolved
+		}
+	}
+	return nil
+}
+
+func validateReferenceLocation(kind, presetID, name, ref string) error {
+	validPart := func(value string) bool {
+		return value != "" && value != "." && value != ".." &&
+			!strings.ContainsAny(value, `/\\`) && path.Clean(value) == value
+	}
+	if !validPart(ref) || !validPart(name) {
+		return fmt.Errorf("preset %q %s %q: reference path must use a plain preset id and name", presetID, kind, name)
+	}
+	return nil
 }
 
 func readAsset(presetID, file string) (string, error) {

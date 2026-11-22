@@ -2,9 +2,12 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -68,19 +71,31 @@ func (h *Handler) evaluateWorkflowTransition(
 	completed db.Issue,
 	evidence squadworkflow.GateEvidence,
 ) squadworkflow.Decision {
+	return h.evaluateWorkflowTransitionWithQueries(ctx, h.Queries, policy, children, prevStatus, completed, evidence)
+}
+
+func (h *Handler) evaluateWorkflowTransitionWithQueries(
+	ctx context.Context,
+	q *db.Queries,
+	policy squadworkflow.Policy,
+	children []db.Issue,
+	prevStatus string,
+	completed db.Issue,
+	evidence squadworkflow.GateEvidence,
+) squadworkflow.Decision {
 	snapshots := make([]squadworkflow.Child, 0, len(children))
 	for _, child := range children {
 		snapshots = append(snapshots, squadworkflow.Child{
 			ID:     uuidToString(child.ID),
 			Stage:  child.Stage.Int32,
 			Staged: child.Stage.Valid,
-			Status: issuestatus.Effective(ctx, h.Queries, child.WorkspaceID, child.Status),
+			Status: issuestatus.Effective(ctx, q, child.WorkspaceID, child.Status),
 		})
 	}
 	return h.WorkflowCoordinator.EvaluateTransition(policy, snapshots, squadworkflow.Transition{
 		ChildID:        uuidToString(completed.ID),
-		PreviousStatus: issuestatus.Effective(ctx, h.Queries, completed.WorkspaceID, prevStatus),
-		CurrentStatus:  issuestatus.Effective(ctx, h.Queries, completed.WorkspaceID, completed.Status),
+		PreviousStatus: issuestatus.Effective(ctx, q, completed.WorkspaceID, prevStatus),
+		CurrentStatus:  issuestatus.Effective(ctx, q, completed.WorkspaceID, completed.Status),
 	}, evidence)
 }
 
@@ -92,14 +107,99 @@ func (h *Handler) evaluateWorkflowTransitionWithApprovals(
 	completed db.Issue,
 	parent db.Issue,
 ) (squadworkflow.Decision, squadworkflow.GateEvidence) {
-	evidence := h.workflowGateEvidence(ctx, policy, parent)
-	decision := h.evaluateWorkflowTransition(ctx, policy, children, prevStatus, completed, evidence)
+	return h.evaluateWorkflowTransitionWithApprovalsAndQueries(ctx, h.Queries, policy, children, prevStatus, completed, parent)
+}
+
+func (h *Handler) evaluateWorkflowTransitionWithApprovalsAndQueries(
+	ctx context.Context,
+	q *db.Queries,
+	policy squadworkflow.Policy,
+	children []db.Issue,
+	prevStatus string,
+	completed db.Issue,
+	parent db.Issue,
+) (squadworkflow.Decision, squadworkflow.GateEvidence) {
+	evidence := h.workflowGateEvidenceWithQueries(ctx, q, policy, parent)
+	decision := h.evaluateWorkflowTransitionWithQueries(ctx, q, policy, children, prevStatus, completed, evidence)
 	if !decision.StageClosed {
 		return decision, evidence
 	}
-	evidence = h.workflowGateEvidenceWithQueriesForStage(ctx, h.Queries, policy, parent, decision.ClosedStage)
-	decision = h.evaluateWorkflowTransition(ctx, policy, children, prevStatus, completed, evidence)
+	evidence = h.workflowGateEvidenceWithQueriesForStage(ctx, q, policy, parent, decision.ClosedStage)
+	decision = h.evaluateWorkflowTransitionWithQueries(ctx, q, policy, children, prevStatus, completed, evidence)
 	return decision, evidence
+}
+
+type squadWorkflowRunGateSnapshot struct {
+	PipelineRound *int32               `json:"pipeline_round"`
+	MissingGates  []squadworkflow.Gate `json:"missing_gates,omitempty"`
+}
+
+func workflowRunMatchesPipelineRound(run db.SquadWorkflowRun, round int) bool {
+	if len(run.GateSnapshot) == 0 {
+		return false
+	}
+	var snapshot squadWorkflowRunGateSnapshot
+	if err := json.Unmarshal(run.GateSnapshot, &snapshot); err != nil {
+		return false
+	}
+	return snapshot.PipelineRound != nil && int(*snapshot.PipelineRound) == round
+}
+
+func hasWorkflowRunForPipelineRound(runs []db.SquadWorkflowRun, round int) bool {
+	for _, run := range runs {
+		if workflowRunMatchesPipelineRound(run, round) {
+			return true
+		}
+	}
+	return false
+}
+
+// recordWorkflowRunForCompletedChild persists a genuine opted-in stage closure
+// in the same transaction as the child status write. The round in the snapshot
+// lets the worker distinguish rework progress from the rejected run that
+// originally requested it.
+func (h *Handler) recordWorkflowRunForCompletedChild(ctx context.Context, q *db.Queries, previous, completed db.Issue) error {
+	if !completed.ParentIssueID.Valid || previous.Status == completed.Status {
+		return nil
+	}
+	parent, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+		ID: completed.ParentIssueID, WorkspaceID: completed.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load parent for workflow run: %w", err)
+	}
+	policy := h.parentWorkflowPolicyWithQueries(ctx, q, parent)
+	if !policy.RequirePipelineVerdict {
+		return nil
+	}
+	children, err := q.ListChildIssues(ctx, parent.ID)
+	if err != nil {
+		return fmt.Errorf("list children for workflow run: %w", err)
+	}
+	decision, _ := h.evaluateWorkflowTransitionWithApprovalsAndQueries(ctx, q, policy, children, previous.Status, completed, parent)
+	if !decision.StageClosed {
+		return nil
+	}
+	round := int32(pipelineMetadataRound(parseIssueMetadata(parent.Metadata)))
+	snapshot, err := json.Marshal(squadWorkflowRunGateSnapshot{
+		PipelineRound: &round,
+		MissingGates:  decision.Gates.Missing,
+	})
+	if err != nil {
+		return fmt.Errorf("encode workflow run gate snapshot: %w", err)
+	}
+	_, err = q.UpsertSquadWorkflowRun(ctx, db.UpsertSquadWorkflowRunParams{
+		WorkspaceID: parent.WorkspaceID, SquadID: parent.AssigneeID, ParentIssueID: parent.ID,
+		ClosedStage: decision.ClosedStage, NextStage: decision.NextStage, State: "pending",
+		GateSnapshot: snapshot, NextAttemptAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("upsert workflow run: %w", err)
+	}
+	return nil
 }
 
 // workflowGateEvidence adapts already-mirrored provider state into the domain
@@ -147,12 +247,23 @@ func (h *Handler) workflowGateEvidenceWithQueriesForStage(ctx context.Context, q
 	if err != nil {
 		return evidence
 	}
+	return applyWorkflowApprovalEvidence(evidence, policy, approvals, pipelineMetadataRound(parseIssueMetadata(issue.Metadata)))
+}
+
+func allowsHumanWorkflowApproval(policy squadworkflow.Policy, gate string) bool {
+	return gate != string(squadworkflow.GateReview) || policy.ReviewAgentID == ""
+}
+
+func applyWorkflowApprovalEvidence(evidence squadworkflow.GateEvidence, policy squadworkflow.Policy, approvals []db.SquadWorkflowApproval, currentRound int) squadworkflow.GateEvidence {
 	for _, approval := range approvals {
-		if !approval.Approved {
+		if !approval.Approved || (policy.RequirePipelineVerdict && int(approval.PipelineRound) != currentRound) {
 			continue
 		}
 		switch approval.Gate {
 		case string(squadworkflow.GateReview):
+			if policy.ReviewAgentID != "" && (approval.ApprovedByType != "agent" || uuidToString(approval.ApprovedByID) != policy.ReviewAgentID) {
+				continue
+			}
 			evidence.ReviewApproved = true
 		case string(squadworkflow.GateHumanApproval):
 			evidence.HumanApproved = true

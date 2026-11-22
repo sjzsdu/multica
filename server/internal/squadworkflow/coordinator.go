@@ -120,7 +120,11 @@ func (c Coordinator) EvaluateTransition(policy Policy, children []Child, transit
 		decision.ClosedStage = completed.Stage
 	}
 	decision.NextStage = nextStage(policy, children, decision.ClosedStage)
-	decision.Gates = c.gateEvaluator().Evaluate(policy, evidence)
+	if policy.DefersFinalGates(decision.NextStage) {
+		decision.Gates = GateResult{Passed: true, Missing: []Gate{}}
+	} else {
+		decision.Gates = c.gateEvaluator().Evaluate(policy, evidence)
+	}
 	decision.CanPromote = decision.StageClosed && decision.Gates.Passed && decision.NextStage > 0
 	decision.CanFinalize = decision.StageClosed && decision.Gates.Passed && decision.NextStage == 0
 	return decision

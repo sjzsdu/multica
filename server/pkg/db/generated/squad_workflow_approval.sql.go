@@ -14,7 +14,7 @@ import (
 const listSquadWorkflowApprovalsByIssue = `-- name: ListSquadWorkflowApprovalsByIssue :many
 SELECT id, workspace_id, squad_id, parent_issue_id, closed_stage, gate,
        approved, approved_by_type, approved_by_id, note, approved_at,
-       created_at, updated_at
+       created_at, updated_at, pipeline_round
 FROM squad_workflow_approval
 WHERE parent_issue_id = $1
 ORDER BY closed_stage DESC, gate ASC
@@ -43,6 +43,7 @@ func (q *Queries) ListSquadWorkflowApprovalsByIssue(ctx context.Context, parentI
 			&i.ApprovedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PipelineRound,
 		); err != nil {
 			return nil, err
 		}
@@ -57,7 +58,7 @@ func (q *Queries) ListSquadWorkflowApprovalsByIssue(ctx context.Context, parentI
 const listSquadWorkflowApprovalsByRun = `-- name: ListSquadWorkflowApprovalsByRun :many
 SELECT id, workspace_id, squad_id, parent_issue_id, closed_stage, gate,
        approved, approved_by_type, approved_by_id, note, approved_at,
-       created_at, updated_at
+       created_at, updated_at, pipeline_round
 FROM squad_workflow_approval
 WHERE parent_issue_id = $1 AND closed_stage = $2
 ORDER BY gate ASC
@@ -91,6 +92,7 @@ func (q *Queries) ListSquadWorkflowApprovalsByRun(ctx context.Context, arg ListS
 			&i.ApprovedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PipelineRound,
 		); err != nil {
 			return nil, err
 		}
@@ -105,8 +107,8 @@ func (q *Queries) ListSquadWorkflowApprovalsByRun(ctx context.Context, arg ListS
 const upsertSquadWorkflowApproval = `-- name: UpsertSquadWorkflowApproval :one
 INSERT INTO squad_workflow_approval (
     workspace_id, squad_id, parent_issue_id, closed_stage, gate, approved,
-    approved_by_type, approved_by_id, note
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    approved_by_type, approved_by_id, note, pipeline_round
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (parent_issue_id, closed_stage, gate) DO UPDATE SET
     workspace_id = EXCLUDED.workspace_id,
     squad_id = EXCLUDED.squad_id,
@@ -114,11 +116,12 @@ ON CONFLICT (parent_issue_id, closed_stage, gate) DO UPDATE SET
     approved_by_type = EXCLUDED.approved_by_type,
     approved_by_id = EXCLUDED.approved_by_id,
     note = EXCLUDED.note,
+    pipeline_round = EXCLUDED.pipeline_round,
     approved_at = now(),
     updated_at = now()
 RETURNING id, workspace_id, squad_id, parent_issue_id, closed_stage, gate,
           approved, approved_by_type, approved_by_id, note, approved_at,
-          created_at, updated_at
+          created_at, updated_at, pipeline_round
 `
 
 type UpsertSquadWorkflowApprovalParams struct {
@@ -131,6 +134,7 @@ type UpsertSquadWorkflowApprovalParams struct {
 	ApprovedByType string      `json:"approved_by_type"`
 	ApprovedByID   pgtype.UUID `json:"approved_by_id"`
 	Note           pgtype.Text `json:"note"`
+	PipelineRound  int32       `json:"pipeline_round"`
 }
 
 func (q *Queries) UpsertSquadWorkflowApproval(ctx context.Context, arg UpsertSquadWorkflowApprovalParams) (SquadWorkflowApproval, error) {
@@ -144,6 +148,7 @@ func (q *Queries) UpsertSquadWorkflowApproval(ctx context.Context, arg UpsertSqu
 		arg.ApprovedByType,
 		arg.ApprovedByID,
 		arg.Note,
+		arg.PipelineRound,
 	)
 	var i SquadWorkflowApproval
 	err := row.Scan(
@@ -160,6 +165,7 @@ func (q *Queries) UpsertSquadWorkflowApproval(ctx context.Context, arg UpsertSqu
 		&i.ApprovedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PipelineRound,
 	)
 	return i, err
 }

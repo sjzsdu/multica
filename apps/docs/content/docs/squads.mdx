@@ -36,7 +36,7 @@ When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a 
 3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster. Each mentioned agent gets a new run, and each mentioned human member gets a notification.
 4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
 5. **The dispatch turn leaves the parent `in_progress`.** Same agent-managed status contract as a direct agent assignment — coordinating the squad is working the parent's ask, so the parent moves from `todo` to `in_progress`, and dispatching members is not delivery, so it stays there while the squad works.
-6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges).
+6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. By default, `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges). An authorized product `accept` in an opt-in verdict-enforced pipeline is the exception.
 
 If the issue is in **Backlog**, the leader is not triggered: Backlog is a parking lot, same rule as for direct agent assignment.
 
@@ -53,6 +53,29 @@ On each squad-leader run, three blocks are appended to the leader's instructions
   The status half of that protocol is **scoped to issues actually assigned to this squad**. A leader woken by an `@squad` mention on someone else's issue gets the same roster and delegation rules, but is told explicitly **not** to touch that issue's status — status stays with the issue's own assignee.
 - **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.
 - **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `multica squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
+
+## Black-box product delivery
+
+Install the preset, which creates or reuses the `黑盒产品交付团队` squad:
+
+```bash
+multica onboard --preset solo-company-blackbox
+```
+
+Create a parent issue describing your idea and assign it to this squad. Work starts only when the issue is not in `backlog`. The flow is product definition → architecture → implementation → deployment pre-validation → independent review → integration/deployment → product acceptance. The preset runs one active child at a time, with 包公 as the fixed independent reviewer and 管仲 as the product role.
+
+CI, independent reviewer approval, PR merge, deployment evidence, and the product verdict must be durable, server-verifiable evidence. PASS/FAIL comments are explanatory only and cannot replace approvals or gates; agents cannot mark the issue `done` directly or write pipeline metadata to bypass them. Intermediate stages skip the final gates, while the final stage requires complete evidence.
+
+Only the review agent configured on the current run can review. The product role records the verdict:
+
+```bash
+multica issue review <issue-id> <approve|reject> --run <run-id> --round <n> [--reason <text>]
+multica issue verdict <issue-id> <accept|reject> --round <n> [--reason <text>]
+```
+
+Rejections require `--reason`. `--round` must equal the current `pipeline_round`; a missing or stale round returns 409, consumes no round, and does not redispatch. Product `accept` revalidates every gate, then atomically completes the issue and records `accepted`.
+
+The first three rejections may start rework. The next rejection records `escalated` and stops automatic dispatch. Only a real human workspace member can then take over and complete the issue manually; machine credentials do not qualify. Manual completion preserves `escalated` rather than recording `accepted`.
 
 ## Leader re-trigger rules
 

@@ -2895,6 +2895,11 @@ const SquadMemberPreviewSchema = z.object({
   role: z.string().default(""),
 }).loose();
 
+const SquadWorkflowPipelineSchema = z.object({
+  max_rounds: z.number().int().min(1),
+  product_agent_id: z.string().default(""),
+}).loose();
+
 export const SquadWorkflowPolicySchema = z.object({
   mode: z.enum(["manual", "staged", "delivery"]).default("manual"),
   max_active_children: z.number().int().min(0).default(0),
@@ -2906,11 +2911,16 @@ export const SquadWorkflowPolicySchema = z.object({
   require_merge: z.boolean().default(false),
   merge_mode: z.enum(["human", "integrator", "pr_close_intent"]).default("human"),
   human_approval_required: z.boolean().default(true),
+  final_gates_only: z.boolean().default(false),
+  review_agent_id: z.string().default(""),
+  require_pipeline_verdict: z.boolean().default(false),
+  pipeline: SquadWorkflowPipelineSchema.nullable().default(null).catch(null),
 }).loose();
 
 export const SquadWorkflowApprovalSchema = z.object({
   id: z.string(),
   closed_stage: z.number().int(),
+  pipeline_round: z.number().int().min(0).catch(0).default(0),
   gate: z.enum(["tests", "review", "merge", "human_approval"]),
   approved: z.boolean(),
   approved_by_type: z.string(),
@@ -2965,6 +2975,10 @@ export const SquadSchema = z.object({
     require_merge: false,
     merge_mode: "human",
     human_approval_required: true,
+    final_gates_only: false,
+    review_agent_id: "",
+    require_pipeline_verdict: false,
+    pipeline: null,
   }),
 }).loose();
 
@@ -2996,6 +3010,10 @@ export const EMPTY_SQUAD: Squad = {
     require_merge: false,
     merge_mode: "human",
     human_approval_required: true,
+    final_gates_only: false,
+    review_agent_id: "",
+    require_pipeline_verdict: false,
+    pipeline: null,
   },
 };
 

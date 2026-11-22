@@ -36,7 +36,7 @@ import { SquadDemo } from "@/components/demos/squad-demo";
 3. **隊長發一條派活評論。** 評論裡用花名冊給好的 mention markdown `@` 選中的成員。被 `@` 的 AI 代理會入隊一次新執行，被 `@` 的人類成員會收到通知。
 4. **隊長記錄 evaluation**：`multica squad activity <issue-id> <outcome> --reason "..."`。這一行會寫進任務的 activity 時間線，方便人類回溯隊長的每次評估。
 5. **派活輪讓父任務處於 `in_progress`。** 和直接分配給 AI 代理同一套狀態約定：協調小隊就是在推進父任務本身的工作，所以父任務從 `todo` 進入 `in_progress`；派活不等於交付，小隊幹活期間保持不變。
-6. **隊長停下。** 派完活，隊長不親自動手。被派成員有回覆時，隊長會被自動喚醒，決定下一步：繼續派活、上拋給人類、在整體目標達成後把父任務推到 `in_review`，或保持沉默。`done` 留給人工確認或既有整合（例如帶 close intent 的 PR merge）。
+6. **隊長停下。** 派完活，隊長不親自動手。被派成員有回覆時，隊長會被自動喚醒，決定下一步：繼續派活、上拋給人類、在整體目標達成後把父任務推到 `in_review`，或保持沉默。預設情況下，`done` 留給人工確認或既有整合（例如帶 close intent 的 PR merge）；明確 opt-in 的 verdict 強制 pipeline 中，授權產品的 `accept` 是例外。
 
 如果任務仍在 `backlog`，分配本身不會觸發隊長。移出 `backlog` 後才會開始執行。
 
@@ -53,6 +53,29 @@ import { SquadDemo } from "@/components/demos/squad-demo";
  其中狀態相關的規則只對"確實分配給本小隊"的任務生效。隊長被別人任務裡的 `@小隊` 喚醒時，同樣拿到花名冊和派活規則，但會被明確告知不要改動那條任務的狀態，狀態仍歸那條任務自己的負責人。
 - **Squad Roster（小隊花名冊）**：隊長一行，加上每個未歸檔成員一行，每行帶可直接複製的 mention markdown（`[@Name](mention://agent/<uuid>)` 或 `[@Name](mention://member/<uuid>)`）。純文字 `@name` 不會觸發任何人。
 - **Squad Instructions（小隊指令）**：你為這個小隊寫的自定義內容，包括路由規則（"資料庫相關派給 Alice，前端派給 Bob"）、上報策略，或任務本身不會有的背景。
+
+## 黑盒產品交付
+
+安裝 preset，建立或複用名稱精確為"黑盒产品交付团队"的小隊：
+
+```bash
+multica onboard --preset solo-company-blackbox
+```
+
+建立一個描述想法的父任務並分配給該小隊。任務不在 `backlog` 時才會啟動。流程為產品定義 → 架構 → 實作 → 部署預驗證 → 獨立評審 → 整合/部署 → 產品驗收。preset 同時只執行一個活躍子任務，固定由包公獨立評審、管仲負責產品驗收。
+
+CI、獨立 reviewer approval、PR merge、部署證據和產品 verdict 必須形成伺服器可驗證的持久證據。評論中的 PASS/FAIL 只是說明，不能取代 approval 或 gate；AI 代理也不能直接標記 `done` 或寫入 pipeline metadata 繞過檢查。中間階段不執行最終 gates，最終階段必須證據完整。
+
+review 只能由目前執行配置的 reviewer 呼叫，產品角色使用 verdict：
+
+```bash
+multica issue review <issue-id> <approve|reject> --run <run-id> --round <n> [--reason <text>]
+multica issue verdict <issue-id> <accept|reject> --round <n> [--reason <text>]
+```
+
+reject 必須填寫 `--reason`。`--round` 必須等於目前 `pipeline_round`；缺失或過期會回傳 409，不消耗輪次，也不重新 dispatch。產品 `accept` 會重新驗證全部 gates，再以原子方式完成任務並寫入 `accepted`。
+
+前三次 reject 可啟動返工；下一次 reject 進入 `escalated` 並停止自動 dispatch。此後只有真實的人類工作區成員才能接管並手動完成，machine credential 不算。人工完成保留 `escalated`，不會寫成 `accepted`。
 
 ## 隊長的再次觸發時機
 

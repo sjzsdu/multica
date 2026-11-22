@@ -325,7 +325,7 @@ func (h *Handler) broadcastCancelledWakeups(ctx context.Context, workspaceID pgt
 // runWithWorkflowCapacityGuard serializes a child promotion or re-parenting
 // with other workflow-capacity writes. Ordinary issue updates retain the
 // lighter status guard above.
-func (h *Handler) runWithWorkflowCapacityGuard(ctx context.Context, workspaceID, issueID pgtype.UUID, statusKey string, targetParentID pgtype.UUID, fn func(q *db.Queries) error) error {
+func (h *Handler) runWithWorkflowCapacityGuard(ctx context.Context, workspaceID, issueID pgtype.UUID, statusKey string, targetParentID pgtype.UUID, fn func(q *db.Queries, current db.Issue) error) error {
 	tx, err := h.beginWakeupWrite(ctx)
 	if err != nil {
 		return err
@@ -346,7 +346,7 @@ func (h *Handler) runWithWorkflowCapacityGuard(ctx context.Context, workspaceID,
 	if err := h.checkWorkflowCapacity(ctx, qtx, current, statusKey, targetParentID); err != nil {
 		return err
 	}
-	if err := fn(qtx); err != nil {
+	if err := fn(qtx, current); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -355,7 +355,7 @@ func (h *Handler) runWithWorkflowCapacityGuard(ctx context.Context, workspaceID,
 func (h *Handler) updateIssueWithWorkflowCapacityGuard(ctx context.Context, workspaceID, issueID pgtype.UUID, statusKey string, targetParentID pgtype.UUID, params db.UpdateIssueParams) (db.Issue, error) {
 	var issue db.Issue
 	var cancelledWakeups []db.AgentTaskQueue
-	err := h.runWithWorkflowCapacityGuard(ctx, workspaceID, issueID, statusKey, targetParentID, func(q *db.Queries) error {
+	err := h.runWithWorkflowCapacityGuard(ctx, workspaceID, issueID, statusKey, targetParentID, func(q *db.Queries, current db.Issue) error {
 		if params.DuplicateOfIssueID.Valid {
 			if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
 				return err
@@ -363,7 +363,10 @@ func (h *Handler) updateIssueWithWorkflowCapacityGuard(ctx context.Context, work
 		}
 		var innerErr error
 		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
-		return innerErr
+		if innerErr != nil {
+			return innerErr
+		}
+		return h.recordWorkflowRunForCompletedChild(ctx, q, current, issue)
 	})
 	if err != nil {
 		return issue, err
@@ -411,6 +414,9 @@ func (h *Handler) writeBatchIssueWithWorkflowCapacityGuard(ctx context.Context, 
 	var cancelled []db.AgentTaskQueue
 	out.issue, cancelled, err = updateIssueStoppingWakeups(ctx, q, params)
 	if err != nil {
+		return out, err
+	}
+	if err := h.recordWorkflowRunForCompletedChild(ctx, q, current, out.issue); err != nil {
 		return out, err
 	}
 	if labels != nil {
@@ -4018,6 +4024,26 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
 	}
 
+	acceptance, pipelineAccept := pipelineAcceptanceForIssue(ctx, current.ID)
+	if pipelineAccept {
+		policy, pipelineParent, policyErr := h.pipelinePolicyForParentIssue(ctx, qtx, current)
+		if policyErr != nil {
+			return db.Issue{}, current, false, fmt.Errorf("load pipeline acceptance policy: %w", policyErr)
+		}
+		currentMetadata := parseIssueMetadata(current.Metadata)
+		currentStatus := issuestatus.Effective(ctx, qtx, current.WorkspaceID, current.Status)
+		if !pipelineParent || pipelineMetadataRound(currentMetadata) != acceptance.expectedRound ||
+			pipelineMetadataStatus(currentMetadata) == pipelineStatusAccepted ||
+			currentStatus == issuestatus.Done || currentStatus == issuestatus.Cancelled {
+			return db.Issue{}, current, false, errPipelineVerdictConflict
+		}
+		if policy.RequirePipelineVerdict {
+			if err := h.validatePipelineAcceptanceReadiness(ctx, qtx, current, policy); err != nil {
+				return db.Issue{}, current, false, err
+			}
+		}
+	}
+
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
 		return db.Issue{}, current, false, errIssueFieldConflict
 	}
@@ -4070,6 +4096,9 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
+	if err := h.recordWorkflowRunForCompletedChild(ctx, qtx, current, issue); err != nil {
+		return db.Issue{}, current, false, err
+	}
 
 	attachmentsChanged := false
 	if len(attachmentIDs) > 0 {
@@ -4091,6 +4120,25 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			if err != nil {
 				return db.Issue{}, current, false, fmt.Errorf("reload issue after attachment link: %w", err)
 			}
+		}
+	}
+	if pipelineAccept {
+		if issuestatus.Effective(ctx, qtx, issue.WorkspaceID, issue.Status) != issuestatus.Done {
+			return db.Issue{}, current, false, errPipelineVerdictConflict
+		}
+		if err := setPipelineMetadataKey(ctx, qtx, issue, pipelineStatusMetadataKey, pipelineStatusAccepted); err != nil {
+			return db.Issue{}, current, false, fmt.Errorf("write pipeline acceptance: %w", err)
+		}
+		issue, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return db.Issue{}, current, false, fmt.Errorf("reload pipeline acceptance: %w", err)
+		}
+		finalMetadata := parseIssueMetadata(issue.Metadata)
+		if pipelineMetadataRound(finalMetadata) != acceptance.expectedRound ||
+			pipelineMetadataStatus(finalMetadata) != pipelineStatusAccepted {
+			return db.Issue{}, current, false, errPipelineVerdictConflict
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -4367,6 +4415,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		// A project move remapped the status; guard the key actually written.
 		statusKeyForGuard = params.Status.String
 	}
+	pipelineTargetStatus := ""
+	if params.Status.Valid {
+		pipelineTargetStatus = params.Status.String
+	}
+	if err := h.checkPipelineCompletion(r.Context(), h.Queries, r, prevIssue, pipelineTargetStatus); err != nil {
+		if errors.Is(err, errPipelineCompletionRequired) {
+			writeError(w, http.StatusForbidden, err.Error())
+		} else {
+			slog.Error("update issue: check pipeline completion", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate pipeline completion")
+		}
+		return
+	}
 	if touchedType || touchedID || handoff != nil {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
@@ -4402,7 +4463,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if parentChanged {
 		targetParentID = params.ParentIssueID
 	}
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	_, internalAcceptance := pipelineAcceptanceForIssue(writeCtx, prevIssue.ID)
+	if internalAcceptance || req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
 			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, handoff != nil, workflowCapacityGuard, targetParentID,
@@ -4417,6 +4479,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
+			return
+		}
+		if errors.Is(err, errPipelineVerdictConflict) {
+			writeError(w, http.StatusConflict, "pipeline verdict conflict; reload the issue and retry")
+			return
+		}
+		if errors.Is(err, errPipelineCompletionRequired) {
+			writeError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		if writeDuplicateMarkError(w, err) {
@@ -5268,6 +5338,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			if params.Status.Valid {
 				issueStatusGuard = params.Status.String
+			}
+			pipelineTargetStatus := ""
+			if params.Status.Valid {
+				pipelineTargetStatus = params.Status.String
+			}
+			if err := h.checkPipelineCompletion(r.Context(), h.Queries, r, prevIssue, pipelineTargetStatus); err != nil {
+				if errors.Is(err, errPipelineCompletionRequired) {
+					skip(issueID, identifier, "pipeline_completion_required", err.Error())
+				} else {
+					slog.Error("batch update issue: check pipeline completion", "issue_id", issueID, "error", err)
+					skip(issueID, identifier, "pipeline_check_failed", "failed to validate pipeline completion")
+				}
+				continue
 			}
 			if batchTouchedType || batchTouchedID || handoff != nil {
 				if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {

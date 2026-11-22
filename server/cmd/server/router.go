@@ -2262,6 +2262,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/", h.UpdateIssue)
 					r.Get("/workflow-runs", h.ListIssueWorkflowRuns)
 					r.With(handler.RequireHumanActor).Post("/workflow-runs/{runId}/approvals", h.UpsertIssueWorkflowApproval)
+					r.Post("/workflow-runs/{runId}/review", h.RecordIssueWorkflowReview)
 					r.Post("/move", h.MoveIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments/trigger-preview", h.PreviewCommentTriggers)

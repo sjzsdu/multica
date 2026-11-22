@@ -85,7 +85,7 @@ func workflowPatchFromFlags(ctx context.Context, client *cli.APIClient, cmd *cob
 		v, _ := cmd.Flags().GetInt("max-active-children")
 		patch["max_active_children"] = v
 	}
-	for _, name := range []string{"auto-promote-stage", "auto-finalize-parent", "require-tests", "require-review", "require-merge", "human-approval-required"} {
+	for _, name := range []string{"auto-promote-stage", "auto-finalize-parent", "require-tests", "require-review", "require-merge", "human-approval-required", "final-gates-only", "require-pipeline-verdict"} {
 		if cmd.Flags().Changed(name) {
 			v, _ := cmd.Flags().GetBool(name)
 			patch[nameToWorkflowKey(name)] = v
@@ -97,6 +97,35 @@ func workflowPatchFromFlags(ctx context.Context, client *cli.APIClient, cmd *cob
 	}
 	if err := applyPipelineFlags(ctx, client, cmd, patch); err != nil {
 		return nil, err
+	}
+	if cmd.Flags().Changed("review-agent") {
+		agent, _ := cmd.Flags().GetString("review-agent")
+		if agent != "" {
+			if cmd.Flags().Changed("require-review") {
+				requireReview, _ := cmd.Flags().GetBool("require-review")
+				if !requireReview {
+					return nil, fmt.Errorf("--review-agent requires --require-review")
+				}
+			}
+			agentID, err := resolveAgent(ctx, client, agent)
+			if err != nil {
+				return nil, fmt.Errorf("resolve review agent: %w", err)
+			}
+			patch["review_agent_id"] = agentID
+		} else {
+			patch["review_agent_id"] = ""
+		}
+	}
+	if requireVerdict, _ := patch["require_pipeline_verdict"].(bool); requireVerdict {
+		pipeline, hasPipeline := patch["pipeline"].(map[string]any)
+		if _, pipelineChanged := patch["pipeline"]; pipelineChanged && (!hasPipeline || strVal(pipeline, "product_agent_id") == "") {
+			return nil, fmt.Errorf("--require-pipeline-verdict requires --pipeline-product-agent")
+		}
+	}
+	if pipeline, ok := patch["pipeline"].(map[string]any); ok {
+		if reviewer, _ := patch["review_agent_id"].(string); reviewer != "" && reviewer == strVal(pipeline, "product_agent_id") {
+			return nil, fmt.Errorf("--review-agent and --pipeline-product-agent must differ")
+		}
 	}
 	return patch, nil
 }
@@ -141,12 +170,14 @@ func applyPipelineFlags(ctx context.Context, client *cli.APIClient, cmd *cobra.C
 
 func nameToWorkflowKey(name string) string {
 	keys := map[string]string{
-		"auto-promote-stage":      "auto_promote_stage",
-		"auto-finalize-parent":    "auto_finalize_parent",
-		"require-tests":           "require_tests",
-		"require-review":          "require_review",
-		"require-merge":           "require_merge",
-		"human-approval-required": "human_approval_required",
+		"auto-promote-stage":       "auto_promote_stage",
+		"auto-finalize-parent":     "auto_finalize_parent",
+		"require-tests":            "require_tests",
+		"require-review":           "require_review",
+		"require-merge":            "require_merge",
+		"human-approval-required":  "human_approval_required",
+		"final-gates-only":         "final_gates_only",
+		"require-pipeline-verdict": "require_pipeline_verdict",
 	}
 	return keys[name]
 }
@@ -162,6 +193,9 @@ func addSquadWorkflowFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("require-merge", false, "Require merge before delivery")
 	cmd.Flags().String("merge-mode", "", "Merge mode: human, integrator, or pr_close_intent")
 	cmd.Flags().Bool("human-approval-required", false, "Require human approval before final delivery")
+	cmd.Flags().Bool("final-gates-only", false, "Evaluate test, review, and merge evidence only at the final stage")
+	cmd.Flags().String("review-agent", "", "Agent name or ID required to record independent review approval; empty removes the restriction")
+	cmd.Flags().Bool("require-pipeline-verdict", false, "Require independent review and product acceptance before completion")
 	cmd.Flags().Int("pipeline-max-rounds", -1, "Pipeline rework rounds before the server escalates to a human; 0 turns the pipeline off. Replaces the stored pipeline block, so restate --pipeline-product-agent with it")
 	cmd.Flags().String("pipeline-product-agent", "", "Agent name or ID allowed to record pipeline verdicts (requires --pipeline-max-rounds above 0); empty lets any squad member verdict")
 }

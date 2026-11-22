@@ -51,6 +51,23 @@ const maxPipelineVerdictReasonRunes = 2000
 // escalated pipeline). Rendered as a 409.
 var errPipelineVerdictConflict = errors.New("pipeline verdict already settled")
 
+var (
+	errPipelineCompletionRequired = errors.New("opt-in pipeline issues require product acceptance; a human may complete only after escalation")
+	errPipelineMetadataProtected  = errors.New("only a human member can change opt-in pipeline metadata")
+)
+
+type pipelineAcceptanceContextKey struct{}
+
+type pipelineAcceptanceWrite struct {
+	issueID       pgtype.UUID
+	expectedRound int
+}
+
+func pipelineAcceptanceForIssue(ctx context.Context, issueID pgtype.UUID) (pipelineAcceptanceWrite, bool) {
+	acceptance, ok := ctx.Value(pipelineAcceptanceContextKey{}).(pipelineAcceptanceWrite)
+	return acceptance, ok && acceptance.issueID == issueID
+}
+
 // pipelineMetadataRound reads the rework round counter; unset means 0.
 func pipelineMetadataRound(meta map[string]any) int {
 	value, ok := meta[pipelineRoundMetadataKey].(float64)
@@ -65,6 +82,133 @@ func pipelineMetadataRound(meta map[string]any) int {
 func pipelineMetadataStatus(meta map[string]any) string {
 	status, _ := meta[pipelineStatusMetadataKey].(string)
 	return status
+}
+
+func pipelineRoundMatches(policy squadworkflow.Policy, metadata map[string]any, requested *int) bool {
+	return !policy.RequirePipelineVerdict || requested != nil && *requested == pipelineMetadataRound(metadata)
+}
+
+// pipelinePolicyForParentIssue resolves only top-level squad work. Squad
+// children keep their ordinary completion and metadata behavior even when the
+// parent's policy opts into product verdicts.
+func (h *Handler) pipelinePolicyForParentIssue(ctx context.Context, q *db.Queries, issue db.Issue) (squadworkflow.Policy, bool, error) {
+	if issue.ParentIssueID.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		return squadworkflow.DefaultPolicy(), false, nil
+	}
+	squad, err := q.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return squadworkflow.DefaultPolicy(), false, nil
+	}
+	if err != nil {
+		return squadworkflow.DefaultPolicy(), false, err
+	}
+	policy := h.loadSquadWorkflowPolicyWithQueries(ctx, q, squad)
+	return policy, policy.Pipeline != nil, nil
+}
+
+func (h *Handler) checkPipelineCompletion(ctx context.Context, q *db.Queries, r *http.Request, issue db.Issue, targetStatus string) error {
+	if targetStatus == "" || issuestatus.Effective(ctx, q, issue.WorkspaceID, targetStatus) != issuestatus.Done {
+		return nil
+	}
+	if _, ok := pipelineAcceptanceForIssue(ctx, issue.ID); ok {
+		return nil
+	}
+	policy, pipelineParent, err := h.pipelinePolicyForParentIssue(ctx, q, issue)
+	if err != nil {
+		return fmt.Errorf("load pipeline completion policy: %w", err)
+	}
+	if !pipelineParent || !policy.RequirePipelineVerdict {
+		return nil
+	}
+	actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	if actorType == "member" && !isMachineCredentialActor(r) &&
+		pipelineMetadataStatus(parseIssueMetadata(issue.Metadata)) == pipelineStatusEscalated {
+		return nil
+	}
+	return errPipelineCompletionRequired
+}
+
+func (h *Handler) checkPipelineMetadataMutation(r *http.Request, issue db.Issue, key string) error {
+	if key != pipelineRoundMetadataKey && key != pipelineStatusMetadataKey {
+		return nil
+	}
+	policy, pipelineParent, err := h.pipelinePolicyForParentIssue(r.Context(), h.Queries, issue)
+	if err != nil {
+		return fmt.Errorf("load pipeline metadata policy: %w", err)
+	}
+	if !pipelineParent || !policy.RequirePipelineVerdict {
+		return nil
+	}
+	actorType, _ := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	if actorType == "member" && !isMachineCredentialActor(r) {
+		return nil
+	}
+	return errPipelineMetadataProtected
+}
+
+type squadTaskAuthorization struct {
+	task      db.AgentTaskQueue
+	squad     db.Squad
+	policy    squadworkflow.Policy
+	actorType string
+	actorID   string
+}
+
+// authorizeSquadAgentTask binds the agent credential, task, issue and squad
+// before either review or verdict code can use task-derived identifiers.
+func (h *Handler) authorizeSquadAgentTask(w http.ResponseWriter, r *http.Request, issue db.Issue, action string) (squadTaskAuthorization, bool) {
+	var auth squadTaskAuthorization
+	taskUUID, ok := parseUUIDOrBadRequest(w, r.Header.Get("X-Task-ID"), "task id")
+	if !ok {
+		return auth, false
+	}
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID: taskUUID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !task.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "task does not belong to issue")
+		return auth, false
+	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	if actorType != "agent" || !task.AgentID.Valid || actorID != uuidToString(task.AgentID) {
+		writeError(w, http.StatusForbidden, "only the agent running this task can "+action)
+		return auth, false
+	}
+	if uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusBadRequest,
+			"task does not belong to issue; "+action+" on issue "+uuidToString(task.IssueID)+" (the issue this task is running on)")
+		return auth, false
+	}
+	if issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
+		writeError(w, http.StatusConflict, "issue is not assigned to a squad")
+		return auth, false
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+		ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "squad not found")
+		return auth, false
+	}
+	isMember, err := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
+		SquadID: squad.ID, MemberType: "agent", MemberID: parseUUID(actorID),
+	})
+	if err != nil {
+		slog.Error("squad task authorization: membership lookup failed", "squad_id", uuidToString(squad.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load squad membership")
+		return auth, false
+	}
+	if !isMember && actorID != uuidToString(squad.LeaderID) {
+		writeError(w, http.StatusForbidden, "only members of this squad can "+action)
+		return auth, false
+	}
+	return squadTaskAuthorization{
+		task: task, squad: squad, policy: h.loadSquadWorkflowPolicy(r.Context(), squad),
+		actorType: actorType, actorID: actorID,
+	}, true
 }
 
 // RecordPipelineVerdict is POST /api/issues/{id}/pipeline/verdict.
@@ -89,6 +233,7 @@ func (h *Handler) RecordPipelineVerdict(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Verdict string `json:"verdict"`
 		Reason  string `json:"reason"`
+		Round   *int   `json:"round"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -116,66 +261,12 @@ func (h *Handler) RecordPipelineVerdict(w http.ResponseWriter, r *http.Request) 
 		reason = string(runes[:maxPipelineVerdictReasonRunes])
 	}
 
-	// Ownership: the caller must be the agent this task was enqueued for.
-	// A task id that does not resolve inside this workspace is refused
-	// generically, before any task-derived id is echoed back.
-	taskUUID, ok := parseUUIDOrBadRequest(w, r.Header.Get("X-Task-ID"), "task id")
+	auth, ok := h.authorizeSquadAgentTask(w, r, issue, "record a verdict")
 	if !ok {
 		return
 	}
-	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
-		ID:          taskUUID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil || !task.IssueID.Valid {
-		writeError(w, http.StatusBadRequest, "task does not belong to issue")
-		return
-	}
-	userID := requestUserID(r)
-	workspaceID := uuidToString(issue.WorkspaceID)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if actorType != "agent" || !task.AgentID.Valid || actorID != uuidToString(task.AgentID) {
-		writeError(w, http.StatusForbidden, "only the agent running this task can record a verdict")
-		return
-	}
-	// Past the ownership gate, naming the task's own issue is safe — and useful:
-	// an agent woken on one issue that verdicts on another gets told where.
-	if uuidToString(task.IssueID) != uuidToString(issue.ID) {
-		writeError(w, http.StatusBadRequest,
-			"task does not belong to issue; record the verdict on issue "+uuidToString(task.IssueID)+" (the issue this task is running on)")
-		return
-	}
-
-	// The pipeline runs on ONE squad-assigned issue; verdicts anywhere else are
-	// ordinary issue edits done through the normal endpoints.
-	if issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		writeError(w, http.StatusConflict, "issue is not assigned to a squad")
-		return
-	}
-	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "squad not found")
-		return
-	}
-	isMember, err := h.Queries.IsSquadMember(r.Context(), db.IsSquadMemberParams{
-		SquadID:    squad.ID,
-		MemberType: "agent",
-		MemberID:   parseUUID(actorID),
-	})
-	if err != nil {
-		slog.Error("pipeline verdict: squad membership lookup failed",
-			"squad_id", uuidToString(squad.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load squad membership")
-		return
-	}
-	if !isMember && actorID != uuidToString(squad.LeaderID) {
-		writeError(w, http.StatusForbidden, "only members of this squad can record a verdict")
-		return
-	}
-	policy := h.loadSquadWorkflowPolicy(r.Context(), squad)
+	task, squad, policy := auth.task, auth.squad, auth.policy
+	actorType, actorID := auth.actorType, auth.actorID
 	if policy.Pipeline == nil {
 		writeError(w, http.StatusConflict, "this squad has no pipeline configured")
 		return
@@ -195,27 +286,43 @@ func (h *Handler) RecordPipelineVerdict(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusConflict, "pipeline already accepted this issue")
 		return
 	}
+	if !pipelineRoundMatches(policy, parseIssueMetadata(issue.Metadata), req.Round) {
+		writeError(w, http.StatusConflict, "pipeline round is missing or stale; reload the issue and retry")
+		return
+	}
 
 	if verdict == "reject" {
-		h.recordPipelineReject(w, r, issue, task, squad, policy, actorType, actorID, reason)
+		h.recordPipelineReject(w, r, issue, task, squad, policy, actorType, actorID, reason, req.Round)
 		return
 	}
 	h.recordPipelineAccept(w, r, issue, task, squad, policy, actorType, actorID, reason)
 }
 
-// recordPipelineAccept closes the issue through the ordinary update path and
-// then stamps the acceptance in metadata. Status first: the response must never
-// claim acceptance for an update the guards refused.
+// recordPipelineAccept delegates one internal update carrying server-only
+// acceptance authority. UpdateIssue commits done and accepted in its atomic
+// transaction, then keeps all of its ordinary post-commit side effects.
 func (h *Handler) recordPipelineAccept(w http.ResponseWriter, r *http.Request, issue db.Issue, task db.AgentTaskQueue, squad db.Squad, policy squadworkflow.Policy, actorType, actorID, reason string) {
-	if !h.delegateIssueStatusUpdate(w, r, `{"status":"done"}`) {
+	if policy.RequirePipelineVerdict {
+		err := h.validatePipelineAcceptanceReadiness(r.Context(), h.Queries, issue, policy)
+		switch {
+		case errors.Is(err, errPipelineVerdictConflict):
+			writeError(w, http.StatusConflict, "pipeline acceptance requires in_review, a reproducible final run, and all workflow gates")
+			return
+		case err != nil:
+			slog.Error("pipeline acceptance readiness failed", "issue_id", uuidToString(issue.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to validate pipeline acceptance")
+			return
+		}
+	}
+	updated, ok := h.delegatePipelineAcceptance(w, r, pipelineAcceptanceWrite{
+		issueID:       issue.ID,
+		expectedRound: pipelineMetadataRound(parseIssueMetadata(issue.Metadata)),
+	})
+	if !ok {
 		return
 	}
-	metadata, revision, err := h.writePipelineVerdictMetadata(r, issue, nil, pipelineStatusAccepted)
-	if err != nil {
-		h.writePipelineMetadataError(w, err, "accept")
-		return
-	}
-	h.publishPipelineMetadataChanged(issue, actorType, actorID, metadata, revision)
+	metadata := updated.Metadata
+	h.publishPipelineMetadataChanged(issue, actorType, actorID, metadata, updated.Revision)
 	round := pipelineMetadataRound(metadata)
 	h.recordPipelineActivity(r, issue, task, squad, policy, actorID, "accept", reason, round, false)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -226,75 +333,48 @@ func (h *Handler) recordPipelineAccept(w http.ResponseWriter, r *http.Request, i
 	})
 }
 
+// validatePipelineAcceptanceReadiness recomputes the latest run instead of
+// trusting its stored state or gate snapshot. The same check runs again with
+// the issue locked in the acceptance transaction.
+func (h *Handler) validatePipelineAcceptanceReadiness(ctx context.Context, q *db.Queries, issue db.Issue, policy squadworkflow.Policy) error {
+	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) != "in_review" ||
+		pipelineMetadataStatus(parseIssueMetadata(issue.Metadata)) == pipelineStatusEscalated {
+		return errPipelineVerdictConflict
+	}
+	runs, err := q.ListSquadWorkflowRunsByParent(ctx, db.ListSquadWorkflowRunsByParentParams{
+		ParentIssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("list workflow runs for pipeline acceptance: %w", err)
+	}
+	if len(runs) == 0 {
+		return errPipelineVerdictConflict
+	}
+	decision, err := h.workflowDecisionForRunWithQueries(ctx, q, runs[0], issue, policy)
+	if err != nil {
+		return err
+	}
+	if !decision.StageClosed || !decision.CanFinalize {
+		return errPipelineVerdictConflict
+	}
+	return nil
+}
+
 // recordPipelineReject counts the round and, when a further round would exceed
 // the cap, escalates. Round, status and — on escalation — the notification
 // comment commit in ONE transaction: a retry after a lost response recomputes
 // from committed state instead of starting a round that never happened, and an
 // escalation can neither be recorded without its comment nor commented without
 // its record.
-func (h *Handler) recordPipelineReject(w http.ResponseWriter, r *http.Request, issue db.Issue, task db.AgentTaskQueue, squad db.Squad, policy squadworkflow.Policy, actorType, actorID, reason string) {
-	var round int
-	var escalated bool
-	var metadata map[string]any
-	var revision int64
-	var comment db.Comment
-	var commentIssueRevision int64
-
-	_, err := wakeupWrite(h, r, func(q *db.Queries) (struct{}, error) {
-		var none struct{}
-		fresh, err := q.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
+func (h *Handler) recordPipelineReject(w http.ResponseWriter, r *http.Request, issue db.Issue, task db.AgentTaskQueue, squad db.Squad, policy squadworkflow.Policy, actorType, actorID, reason string, expectedRound *int) {
+	result, err := wakeupWrite(h, r, func(q *db.Queries) (pipelineRejectWrite, error) {
+		current, err := q.LockIssueForDescriptionUpdate(r.Context(), db.LockIssueForDescriptionUpdateParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
-			return none, err
+			return pipelineRejectWrite{}, err
 		}
-		// Re-read inside the write: a concurrent verdict may have settled this
-		// round while the request was being authorized.
-		switch pipelineMetadataStatus(parseIssueMetadata(fresh.Metadata)) {
-		case pipelineStatusEscalated, pipelineStatusAccepted:
-			return none, errPipelineVerdictConflict
-		}
-
-		round = pipelineMetadataRound(parseIssueMetadata(fresh.Metadata)) + 1
-		escalated = round > policy.Pipeline.MaxRounds
-		status := pipelineStatusRejected
-		if escalated {
-			status = pipelineStatusEscalated
-		}
-		if err := setPipelineMetadataKey(r.Context(), q, issue, pipelineRoundMetadataKey, round); err != nil {
-			return none, err
-		}
-		if err := setPipelineMetadataKey(r.Context(), q, issue, pipelineStatusMetadataKey, status); err != nil {
-			return none, err
-		}
-		if escalated {
-			created, err := q.CreateComment(r.Context(), db.CreateCommentParams{
-				ID:           dbid.NewV7(),
-				IssueID:      issue.ID,
-				WorkspaceID:  issue.WorkspaceID,
-				AuthorType:   actorType,
-				AuthorID:     parseUUID(actorID),
-				Content:      h.pipelineEscalationContent(r.Context(), issue, task, squad, reason, round, policy.Pipeline.MaxRounds),
-				Type:         "comment",
-				SourceTaskID: task.ID,
-			})
-			if err != nil {
-				return none, err
-			}
-			comment = created.Comment()
-			commentIssueRevision = created.IssueRevision
-		}
-		final, err := q.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			return none, err
-		}
-		metadata = parseIssueMetadata(final.Metadata)
-		revision = final.Revision
-		return none, nil
+		return h.writePipelineReject(r.Context(), q, current, task, squad, policy, actorType, actorID, reason, expectedRound, nil)
 	})
 	switch {
 	case errors.Is(err, errPipelineVerdictConflict):
@@ -304,23 +384,127 @@ func (h *Handler) recordPipelineReject(w http.ResponseWriter, r *http.Request, i
 		writeError(w, http.StatusNotFound, "issue not found")
 		return
 	case err != nil:
-		slog.Error("pipeline reject failed", "issue_id", uuidToString(issue.ID), "round", round, "error", err)
+		slog.Error("pipeline reject failed", "issue_id", uuidToString(issue.ID), "round", result.Round, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to record verdict")
 		return
 	}
 
-	h.publishPipelineMetadataChanged(issue, actorType, actorID, metadata, revision)
-	if escalated {
-		h.announcePipelineEscalation(r, issue, actorType, actorID, comment, commentIssueRevision)
+	h.publishPipelineMetadataChanged(issue, actorType, actorID, result.Metadata, result.Revision)
+	if result.Escalated {
+		h.announcePipelineEscalation(r, issue, actorType, actorID, result.Comment, result.CommentIssueRevision)
 	}
-	h.recordPipelineActivity(r, issue, task, squad, policy, actorID, "reject", reason, round, escalated)
+	h.recordPipelineActivity(r, issue, task, squad, policy, actorID, "reject", reason, result.Round, result.Escalated)
+	if policy.RequirePipelineVerdict && !result.Escalated {
+		if err := h.dispatchPipelineRework(r.Context(), issue, policy, result.Round, reason); err != nil {
+			slog.Error("pipeline rework dispatch failed after verdict commit",
+				"issue_id", uuidToString(issue.ID), "round", result.Round, "error", err)
+			writeError(w, http.StatusServiceUnavailable, "verdict committed, but automatic rework dispatch failed; the workflow worker will retry")
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"verdict":    "reject",
-		"round":      round,
+		"round":      result.Round,
 		"max_rounds": policy.Pipeline.MaxRounds,
-		"escalated":  escalated,
-		"metadata":   metadata,
+		"escalated":  result.Escalated,
+		"metadata":   result.Metadata,
 	})
+}
+
+type pipelineRejectWrite struct {
+	Round                int
+	Escalated            bool
+	Metadata             map[string]any
+	Revision             int64
+	Comment              db.Comment
+	CommentIssueRevision int64
+}
+
+// writePipelineReject is the single capped-rework transaction used by both the
+// product verdict and independent review. beforeReject persists evidence for
+// the round being rejected before the counter advances.
+func (h *Handler) writePipelineReject(
+	ctx context.Context,
+	q *db.Queries,
+	issue db.Issue,
+	task db.AgentTaskQueue,
+	squad db.Squad,
+	policy squadworkflow.Policy,
+	actorType, actorID, reason string,
+	expectedRound *int,
+	beforeReject func(reviewedRound int) error,
+) (pipelineRejectWrite, error) {
+	result := pipelineRejectWrite{}
+	currentMetadata := parseIssueMetadata(issue.Metadata)
+	switch pipelineMetadataStatus(currentMetadata) {
+	case pipelineStatusEscalated, pipelineStatusAccepted:
+		return result, errPipelineVerdictConflict
+	}
+	status := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
+	if status == issuestatus.Done || status == issuestatus.Cancelled || !pipelineRoundMatches(policy, currentMetadata, expectedRound) {
+		return result, errPipelineVerdictConflict
+	}
+	reviewedRound := pipelineMetadataRound(currentMetadata)
+	if beforeReject != nil {
+		if err := beforeReject(reviewedRound); err != nil {
+			return result, err
+		}
+	}
+
+	result.Round = reviewedRound + 1
+	result.Escalated = result.Round > policy.Pipeline.MaxRounds
+	pipelineStatus := pipelineStatusRejected
+	if result.Escalated {
+		pipelineStatus = pipelineStatusEscalated
+	}
+	if err := setPipelineMetadataKey(ctx, q, issue, pipelineRoundMetadataKey, result.Round); err != nil {
+		return pipelineRejectWrite{}, err
+	}
+	if err := setPipelineMetadataKey(ctx, q, issue, pipelineStatusMetadataKey, pipelineStatus); err != nil {
+		return pipelineRejectWrite{}, err
+	}
+	if result.Escalated {
+		created, err := q.CreateComment(ctx, db.CreateCommentParams{
+			ID:           dbid.NewV7(),
+			IssueID:      issue.ID,
+			WorkspaceID:  issue.WorkspaceID,
+			AuthorType:   actorType,
+			AuthorID:     parseUUID(actorID),
+			Content:      h.pipelineEscalationContent(ctx, issue, task, squad, reason, result.Round, policy.Pipeline.MaxRounds),
+			Type:         "comment",
+			SourceTaskID: task.ID,
+		})
+		if err != nil {
+			return pipelineRejectWrite{}, err
+		}
+		result.Comment = created.Comment()
+		result.CommentIssueRevision = created.IssueRevision
+	}
+	final, err := q.GetIssueMetadataInWorkspace(ctx, db.GetIssueMetadataInWorkspaceParams{
+		ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return pipelineRejectWrite{}, err
+	}
+	result.Metadata = parseIssueMetadata(final.Metadata)
+	result.Revision = final.Revision
+	return result, nil
+}
+
+// dispatchPipelineRework runs after the rejected round has committed. The
+// durable recovery scan uses the same dispatch key if this post-commit call
+// fails, so a lost response cannot lose the rework or start another round.
+func (h *Handler) dispatchPipelineRework(ctx context.Context, issue db.Issue, policy squadworkflow.Policy, round int, reason string) error {
+	runs, err := h.Queries.ListSquadWorkflowRunsByParent(ctx, db.ListSquadWorkflowRunsByParentParams{
+		ParentIssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("list workflow runs for pipeline rework: %w", err)
+	}
+	if len(runs) == 0 {
+		return errors.New("pipeline rework requires a workflow run")
+	}
+	return NewWorkflowRetryWorker(h).dispatchWorkflowActionWithReason(ctx, runs[0], issue, policy, "rework", round, reason)
 }
 
 // setPipelineMetadataKey writes one primitive verdict key. A no-op (the value is
@@ -343,68 +527,34 @@ func setPipelineMetadataKey(ctx context.Context, q *db.Queries, issue db.Issue, 
 	return err
 }
 
-// writePipelineVerdictMetadata persists a single-key verdict update (accept)
-// and returns the committed snapshot.
-func (h *Handler) writePipelineVerdictMetadata(r *http.Request, issue db.Issue, round *int, status string) (map[string]any, int64, error) {
-	var metadata map[string]any
-	var revision int64
-	_, err := wakeupWrite(h, r, func(q *db.Queries) (struct{}, error) {
-		var none struct{}
-		if round != nil {
-			if err := setPipelineMetadataKey(r.Context(), q, issue, pipelineRoundMetadataKey, *round); err != nil {
-				return none, err
-			}
-		}
-		if err := setPipelineMetadataKey(r.Context(), q, issue, pipelineStatusMetadataKey, status); err != nil {
-			return none, err
-		}
-		final, err := q.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			return none, err
-		}
-		metadata = parseIssueMetadata(final.Metadata)
-		revision = final.Revision
-		return none, nil
-	})
-	return metadata, revision, err
-}
-
-func (h *Handler) writePipelineMetadataError(w http.ResponseWriter, err error, op string) {
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "issue not found")
-		return
-	}
-	slog.Error("pipeline verdict metadata write failed", "operation", op, "error", err)
-	writeError(w, http.StatusInternalServerError, "failed to record verdict")
-}
-
-// delegateIssueStatusUpdate runs the public UpdateIssue handler against a
-// synthetic body and a recording ResponseWriter, and reports whether the update
-// landed. Delegating (rather than issuing the status UPDATE directly) is the
-// point: the status guard, wake-ups, activity, events and sub-issue rules all
-// run exactly as they do when a member sets the status, and a refusal reaches
-// the caller with its original status and body.
-func (h *Handler) delegateIssueStatusUpdate(w http.ResponseWriter, r *http.Request, body string) bool {
-	sub := r.Clone(r.Context())
+// delegatePipelineAcceptance runs UpdateIssue with an unexported context value.
+// No request header or JSON field can manufacture this authority.
+func (h *Handler) delegatePipelineAcceptance(w http.ResponseWriter, r *http.Request, acceptance pipelineAcceptanceWrite) (IssueResponse, bool) {
+	ctx := context.WithValue(r.Context(), pipelineAcceptanceContextKey{}, acceptance)
+	sub := r.Clone(ctx)
+	const body = `{"status":"done"}`
 	sub.Body = io.NopCloser(strings.NewReader(body))
 	sub.ContentLength = int64(len(body))
 
 	recorder := &pipelineUpdateRecorder{header: make(http.Header)}
 	h.UpdateIssue(recorder, sub)
-	if recorder.statusCode() < 400 {
-		return true
-	}
-	for key, values := range recorder.header {
-		for _, value := range values {
-			w.Header().Add(key, value)
+	if recorder.statusCode() >= 400 {
+		for key, values := range recorder.header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
 		}
+		w.WriteHeader(recorder.statusCode())
+		_, _ = w.Write(recorder.body.Bytes())
+		return IssueResponse{}, false
 	}
-	w.WriteHeader(recorder.statusCode())
-	_, _ = w.Write(recorder.body.Bytes())
-	return false
+	var updated IssueResponse
+	if err := json.Unmarshal(recorder.body.Bytes(), &updated); err != nil {
+		slog.Error("decode pipeline acceptance update", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to record verdict")
+		return IssueResponse{}, false
+	}
+	return updated, true
 }
 
 // pipelineUpdateRecorder captures what a delegated handler wrote so its refusal

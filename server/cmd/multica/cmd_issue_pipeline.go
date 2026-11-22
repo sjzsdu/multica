@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -36,10 +37,29 @@ the reason and round can be quoted back in the rework request.`,
 	RunE: runIssueVerdict,
 }
 
+var issueReviewCmd = &cobra.Command{
+	Use:   "review <issue-id> <approve|reject>",
+	Short: "Record the independent review for a workflow run",
+	Long: `Record the configured independent reviewer's decision for a workflow run.
+
+  multica issue review MUL-12 approve --run <run-id> --round 0
+  multica issue review MUL-12 reject --run <run-id> --round 0 --reason "checkout regresses"
+
+The round must match the issue's current pipeline round. Rejections require
+--reason so the implementation leader receives actionable rework evidence.`,
+	Args: cobra.ExactArgs(2),
+	RunE: runIssueReview,
+}
+
 func init() {
 	issueVerdictCmd.Flags().String("reason", "", "Why the build was rejected (required for reject)")
+	issueVerdictCmd.Flags().Int("round", 0, "Current pipeline round (required by verdict-enforced squads)")
 	issueVerdictCmd.Flags().String("output", "table", "Output format: table or json")
-	issueCmd.AddCommand(issueVerdictCmd)
+	issueReviewCmd.Flags().String("run", "", "Workflow run ID (required)")
+	issueReviewCmd.Flags().Int("round", 0, "Current pipeline round (required)")
+	issueReviewCmd.Flags().String("reason", "", "Review note (required for reject)")
+	issueReviewCmd.Flags().String("output", "table", "Output format: table or json")
+	issueCmd.AddCommand(issueVerdictCmd, issueReviewCmd)
 }
 
 func runIssueVerdict(cmd *cobra.Command, args []string) error {
@@ -51,6 +71,10 @@ func runIssueVerdict(cmd *cobra.Command, args []string) error {
 	reason = strings.TrimSpace(reason)
 	if verdict == "reject" && reason == "" {
 		return fmt.Errorf("--reason is required when rejecting")
+	}
+	round, _ := cmd.Flags().GetInt("round")
+	if round < 0 {
+		return fmt.Errorf("--round must be >= 0")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -68,6 +92,9 @@ func runIssueVerdict(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	path := "/api/issues/" + issueRef.ID + "/pipeline/verdict"
 	body := map[string]any{"verdict": verdict, "reason": reason}
+	if cmd.Flags().Changed("round") {
+		body["round"] = round
+	}
 	if err := client.PostJSON(ctx, path, body, &result); err != nil {
 		return fmt.Errorf("record verdict: %w", err)
 	}
@@ -84,6 +111,55 @@ func runIssueVerdict(cmd *cobra.Command, args []string) error {
 	} else if metadata, ok := result["metadata"].(map[string]any); ok {
 		fmt.Printf("Status:   %s\n", strVal(metadata, "pipeline_status"))
 	}
+	return nil
+}
+
+func runIssueReview(cmd *cobra.Command, args []string) error {
+	action := strings.ToLower(strings.TrimSpace(args[1]))
+	if action != "approve" && action != "reject" {
+		return fmt.Errorf("review decision must be 'approve' or 'reject', got %q", args[1])
+	}
+	runID, _ := cmd.Flags().GetString("run")
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("--run is required")
+	}
+	if !cmd.Flags().Changed("round") {
+		return fmt.Errorf("--round is required")
+	}
+	round, _ := cmd.Flags().GetInt("round")
+	if round < 0 {
+		return fmt.Errorf("--round must be >= 0")
+	}
+	note, _ := cmd.Flags().GetString("reason")
+	note = strings.TrimSpace(note)
+	if action == "reject" && note == "" {
+		return fmt.Errorf("--reason is required when rejecting")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	path := "/api/issues/" + issueRef.ID + "/workflow-runs/" + url.PathEscape(runID) + "/review"
+	body := map[string]any{"approved": action == "approve", "note": note, "round": round}
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("record review: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	fmt.Printf("Review:   %s\n", action)
+	fmt.Printf("Round:    %s\n", numberVal(result, "pipeline_round"))
 	return nil
 }
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -78,6 +79,77 @@ func TestWorkflowHandoffCancelsDeferredSquadStages(t *testing.T) {
 					t.Error("opting out of stopping must preserve runnable squad work")
 				}
 			})
+		}
+	}
+}
+
+func TestWorkflowAgentDispatchDeduplicatesAcrossCompletedTasks(t *testing.T) {
+	seedTestCatalog(t)
+	fx := newSquadBriefingClaimFixture(t, t.Context(), "Durable workflow dispatch")
+	issue, err := testHandler.Queries.GetIssue(t.Context(), parseUUID(fx.IssueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			_, err := testHandler.TaskService.EnqueueTaskForWorkflowAgent(
+				t.Context(), issue, parseUUID(fx.AgentID), parseUUID(fx.SquadID), true,
+				"stabilize:run-1:0", "stabilize the final delivery", parseUUID(testUserID),
+			)
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	created := 0
+	for err := range errs {
+		if err == nil {
+			created++
+			continue
+		}
+		if !errors.Is(err, service.ErrDuplicatePendingTask) {
+			t.Fatalf("same dispatch key = %v, want coalesced", err)
+		}
+	}
+	if created != 1 {
+		t.Fatalf("successful dispatch admissions = %d, want 1", created)
+	}
+
+	tasks, err := testHandler.Queries.ListTasksByIssue(t.Context(), issue.ID)
+	if err != nil || len(tasks) != 1 {
+		t.Fatalf("dispatch tasks = %+v, %v; want one", tasks, err)
+	}
+	var taskContext map[string]any
+	if err := json.Unmarshal(tasks[0].Context, &taskContext); err != nil {
+		t.Fatalf("decode dispatch context: %v", err)
+	}
+	if !tasks[0].IsLeaderTask || taskContext["workflow_dispatch_key"] != "stabilize:run-1:0" {
+		t.Fatalf("dispatch lost leader role or durable key: %+v", tasks[0])
+	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed',completed_at=now() WHERE id=$1`, tasks[0].ID)
+	if _, err := testHandler.TaskService.EnqueueTaskForWorkflowAgent(
+		t.Context(), issue, parseUUID(fx.AgentID), parseUUID(fx.SquadID), true,
+		"stabilize:run-1:0", "duplicate", parseUUID(testUserID),
+	); !errors.Is(err, service.ErrDuplicatePendingTask) {
+		t.Fatalf("completed dispatch replay = %v, want coalesced", err)
+	}
+
+	if _, err := testHandler.TaskService.EnqueueTaskForWorkflowAgent(
+		t.Context(), issue, parseUUID(fx.AgentID), parseUUID(fx.SquadID), false,
+		"review:run-1:0", "review the current round", parseUUID(testUserID),
+	); err != nil {
+		t.Fatalf("different dispatch key was coalesced: %v", err)
+	}
+	tasks, err = testHandler.Queries.ListTasksByIssue(t.Context(), issue.ID)
+	if err != nil || len(tasks) != 2 {
+		t.Fatalf("different dispatch keys created %d tasks, want 2 (%v)", len(tasks), err)
+	}
+	for _, task := range tasks {
+		if strings.Contains(string(task.Context), "review:run-1:0") && task.IsLeaderTask {
+			t.Fatalf("reviewer dispatch unexpectedly became a leader task: %+v", task)
 		}
 	}
 }

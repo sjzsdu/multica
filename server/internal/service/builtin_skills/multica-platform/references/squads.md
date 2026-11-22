@@ -297,7 +297,10 @@ backlog for a later retry. Set `human_approval_required=false` when a fully
 unattended delivery path is intended; it defaults to true.
 `auto_finalize_parent` is a separate opt-in: after the final barrier and all
 gates pass, it moves the parent to `in_review`; it never moves a parent to
-`done`, which remains a human/integration decision.
+`done`. By default `done` remains a human/integration decision. The exception
+is an authorized product `accept` in an explicitly opted-in verdict-enforced
+pipeline, which completes the parent only after the server revalidates every
+gate.
 
 Each closed stage barrier is also recorded in `squad_workflow_run`. The server
 uses a leased retry worker to revisit pending or blocked runs after capacity
@@ -306,8 +309,11 @@ another child status transition to restart the workflow.
 
 Workflow runs are readable from `GET /api/issues/<parent-id>/workflow-runs`.
 A human reviewer can record or revoke the review/final-approval gate with
-`POST /api/issues/<parent-id>/workflow-runs/<run-id>/approvals`; the request
-must come from a human actor and the durable approval wakes the retry worker.
+`POST /api/issues/<parent-id>/workflow-runs/<run-id>/approvals`; this route
+remains human-only, and the durable approval wakes the retry worker. When
+`review_agent_id` fixes an independent reviewer, a human approval cannot
+substitute for that reviewer's review gate. The configured agent uses
+`POST /api/issues/{id}/workflow-runs/{runId}/review` instead.
 
 The completion decision itself is centralized in the persistence-neutral
 workflow coordinator. External CI, PR, review, and approval systems should be
@@ -315,6 +321,96 @@ implemented as `GateEvaluator` adapters instead of adding provider-specific
 branches to the issue handlers. The current handler already consumes mirrored
 GitHub check and merge snapshots for the test/merge gates; review and human
 approval remain fail-closed until their evidence providers are added.
+
+## Black-box product delivery
+
+Install the preset with:
+
+```bash
+multica onboard --preset solo-company-blackbox
+```
+
+It creates or reuses the `黑盒产品交付团队` squad. Create a parent issue that
+describes the idea and assign it to this squad; assignment does not start work
+while the parent is in `backlog`. The delivery sequence is product definition →
+architecture → implementation → deployment pre-validation → independent review
+→ integration/deployment → product acceptance.
+
+The preset fixes this workflow policy:
+
+- `mode=delivery`, `max_active_children=1`, and
+  `child_completion_signal=review_ready`;
+- `auto_promote_stage=true` and `auto_finalize_parent=true`;
+- `require_tests=true`, `require_review=true`, and `require_merge=true`, with
+  `merge_mode=integrator`;
+- `human_approval_required=false` and `final_gates_only=true`;
+- `review_agent_id=包公`, `require_pipeline_verdict=true`,
+  `pipeline.max_rounds=3`, and `pipeline.product_agent_id=管仲` (the product
+  role).
+
+Intermediate stages do not evaluate the final gates. The final stage must have
+the complete evidence set. `final_gates_only`, `review_agent_id`, and
+`require_pipeline_verdict` are explicit opt-ins for other squads; when omitted,
+they preserve the legacy behavior.
+
+The three squad CLI flags that control the new opt-ins are
+`--final-gates-only`, `--review-agent`, and `--require-pipeline-verdict`. For
+example, a complete fixed-reviewer/product update also supplies the pipeline
+block:
+
+```bash
+multica squad update <squad-id> \
+  --require-review \
+  --final-gates-only \
+  --review-agent "包公" \
+  --require-pipeline-verdict \
+  --pipeline-max-rounds 3 \
+  --pipeline-product-agent "管仲"
+```
+
+`--review-agent` accepts an agent name or UUID; an empty string clears it. A
+fixed reviewer requires `--require-review` and must differ from the pipeline
+product. `--require-pipeline-verdict` requires `--pipeline-product-agent`.
+
+### Evidence and decision routes
+
+CI, independent reviewer approval, PR merge, deployment evidence, and the
+product verdict must be durable evidence that the server can verify. A comment
+containing PASS or FAIL is explanatory only: it cannot replace an approval or a
+gate. An agent cannot mark the issue `done` directly or write pipeline metadata
+to bypass these checks.
+
+Only the review agent configured on the current run can record a review:
+
+```bash
+multica issue review <issue-id> <approve|reject> --run <run-id> --round <n> [--reason <text>]
+```
+
+The configured product role records its verdict with:
+
+```bash
+multica issue verdict <issue-id> <accept|reject> --round <n> [--reason <text>]
+```
+
+A rejection must include `--reason`. For black-box requests, `--round` must
+match the current `pipeline_round`; a missing or stale round returns HTTP 409,
+does not consume a round, and does not trigger another dispatch. The agent
+review API route is `POST /api/issues/{id}/workflow-runs/{runId}/review`. The
+existing human approvals route remains human-only and cannot replace the fixed
+reviewer's gate.
+
+### Automatic rounds and human takeover
+
+The server automatically dispatches stabilization, review, integration,
+accept, and rework, deduplicating dispatch by run and round. Product
+`accept` revalidates all gates, then atomically completes the issue and records
+`accepted`.
+
+The first three rejections may start rework. The next rejection records
+`escalated` and stops automatic dispatch. Only a real human workspace member
+can then take over and complete the issue manually; a machine credential does
+not qualify. Manual completion preserves `escalated` rather than presenting the
+outcome as `accepted`.
 
 ## References
 

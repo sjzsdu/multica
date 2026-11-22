@@ -41,6 +41,7 @@ var projectScopedRouteParams = map[string]privateRouteResolver{
 	"resources/{resourceId}":           func(f *privateRouteFixture, _ string) string { return f.projectResource() },
 	"issue-views/{id}":                 func(f *privateRouteFixture, _ string) string { return f.projectView() },
 	"issues/{id}":                      func(f *privateRouteFixture, _ string) string { return f.issue() },
+	"workflow-runs/{runId}":            func(f *privateRouteFixture, _ string) string { return f.workflowRun() },
 	"comments/{commentId}":             func(f *privateRouteFixture, _ string) string { return f.comment() },
 	"supplements/{commentId}":          func(f *privateRouteFixture, _ string) string { return f.supplement() },
 	"attachments/{id}":                 func(f *privateRouteFixture, _ string) string { return f.attachment() },
@@ -214,6 +215,18 @@ func (f *privateRouteFixture) issueRun() string {
 		return f.fx.Task(f.t, f.shared.agentID, dbfx.Cols{
 			"issue_id": f.issue(), "runtime_id": f.shared.runtimeID, "status": "failed",
 			"originator_user_id": f.shared.insiderID, "accountable_user_id": f.shared.insiderID,
+		})
+	})
+}
+
+func (f *privateRouteFixture) workflowRun() string {
+	return f.once("workflowRun", func() string {
+		squadID := f.fx.Insert(f.t, "squad", dbfx.Cols{
+			"workspace_id": f.fx.WorkspaceID, "name": "Private route probe squad " + f.projectID,
+			"leader_id": f.shared.agentID, "creator_id": f.shared.insiderID,
+		})
+		return f.fx.Insert(f.t, "squad_workflow_run", dbfx.Cols{
+			"workspace_id": f.fx.WorkspaceID, "squad_id": squadID, "parent_issue_id": f.issue(),
 		})
 	})
 }

@@ -1929,6 +1929,7 @@ type SquadWorkflowApproval struct {
 	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	PipelineRound  int32              `json:"pipeline_round"`
 }
 
 type SquadWorkflowPolicy struct {

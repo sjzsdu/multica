@@ -368,6 +368,180 @@
           ]
         }
       ]
+    },
+    {
+      "id": "solo-company-blackbox",
+      "name": "Solo Company Blackbox",
+      "description": "黑盒产品交付团队：产品定义 → 架构 → 实现 → 部署预验证 → 独立复核 → 集成部署 → 产品验收，含服务端门禁与最多三轮返工。",
+      "skills": [
+        {
+          "ref": "solo-company",
+          "name": "agent-native-system-design"
+        },
+        {
+          "ref": "solo-company",
+          "name": "architecture-decision-record"
+        },
+        {
+          "ref": "solo-company",
+          "name": "solo-dev-architecture-constraints"
+        },
+        {
+          "ref": "solo-company",
+          "name": "tech-stack-decision-matrix"
+        },
+        {
+          "ref": "solo-company",
+          "name": "agentic-design-system"
+        },
+        {
+          "ref": "solo-company",
+          "name": "competitive-research"
+        },
+        {
+          "ref": "solo-company",
+          "name": "impeccable-frontend-design"
+        },
+        {
+          "ref": "solo-company",
+          "name": "ui-visual-verification"
+        },
+        {
+          "ref": "solo-company",
+          "name": "database-design-patterns"
+        },
+        {
+          "ref": "solo-company",
+          "name": "debugging-playbook"
+        },
+        {
+          "ref": "solo-company",
+          "name": "gh-skill"
+        },
+        {
+          "ref": "solo-company",
+          "name": "git-workflow"
+        },
+        {
+          "ref": "solo-company",
+          "name": "performance-optimization"
+        },
+        {
+          "ref": "solo-company",
+          "name": "pragmatic-implementation"
+        },
+        {
+          "ref": "solo-company",
+          "name": "software-design-principles"
+        },
+        {
+          "ref": "solo-company",
+          "name": "quality-engineer-playbook"
+        },
+        {
+          "ref": "solo-company",
+          "name": "regression-and-flaky-test-strategy"
+        },
+        {
+          "ref": "solo-company",
+          "name": "test-design-techniques"
+        },
+        {
+          "ref": "solo-company",
+          "name": "sre-reliability-playbook"
+        },
+        {
+          "ref": "solo-company",
+          "name": "data-driven-decision-framework"
+        }
+      ],
+      "agents": [
+        {
+          "name": "管仲 - 产品负责人",
+          "description": "黑盒产品交付负责人：拆解四阶段交付、推动集成部署、基于可观察证据完成产品验收",
+          "instructions_file": "agents/guanzhong.md",
+          "model": "deepseek-v4-pro",
+          "max_concurrent_tasks": 3,
+          "permission": "workspace",
+          "skills": [
+            "data-driven-decision-framework"
+          ]
+        },
+        {
+          "ref": "solo-company",
+          "name": "巧匠 - 产品设计 & 增长"
+        },
+        {
+          "ref": "solo-company",
+          "name": "鲁班 - 首席架构师"
+        },
+        {
+          "ref": "solo-company",
+          "name": "墨子 - 全栈工程师"
+        },
+        {
+          "ref": "solo-company",
+          "name": "神机 - 运维工程师"
+        },
+        {
+          "ref": "solo-company",
+          "name": "包公 - 质量工程师"
+        }
+      ],
+      "squads": [
+        {
+          "name": "黑盒产品交付团队",
+          "description": "从产品想法到验收交付的黑盒小队：四阶段顺序执行，独立复核，服务端集成与产品 verdict 门禁",
+          "instructions": "你是管仲，按黑盒交付协议协调本小队。本协议优先于复用成员源指令中的通用人工交付门禁，但删数据、轮换凭证、变更域名、未批准费用及其他不可逆或对外操作仍须真实人类确认。复用成员的源 instructions 不改写；你必须把相关约束写进子任务描述和 handoff。\n\n固定阶段：1 巧匠负责产品研究、PRD 和逐条验收标准；2 鲁班负责架构、技术选型和 ADR；3 墨子负责实现、测试、PR 和 head SHA；4 神机负责预览或项目已声明环境的部署预验证。首阶段 todo，其余 backlog；每阶段只派对应负责人，不跳步、不重复建子任务。中间阶段只凭阶段屏障晋级，最终阶段必须重新验证 CI、当前轮包公 approval、merge 和部署证据。\n\n所有 handoff 标明 run ID、round、相关子任务、验收标准位置、PR/head SHA、CI、部署结果和未验证盲区。证据写成“结论 + 可复现命令/URL + 关键输出 + 版本”，不能只写“已通过”。评论中的 PASS/FAIL 只是说明，服务端持久证据才是 gate。\n\nreviewer 由服务端按 run/round 直接派发包公，不要用普通评论重复派发。review handoff 必须包含 run ID、round、阶段 1 验收标准位置、PR/head SHA、部署预验证和 CI 证据，并要求包公执行：multica issue review <parent-id> <approve|reject> --run <run-id> --round <round> [--reason <text>]。reject 必须有可执行的 reason；只有当前轮服务端 approval 满足 review gate。\n\nstabilization 先判断 CI 等待/同步还是实际缺陷；integration 先核对当前轮 approval、CI 和可合并状态，再按项目方式合并、部署并记录 URL/健康检查。任何需要修改代码、配置或验收对象的情况，都必须先用 multica issue verdict <parent-id> reject --round <round> --reason <text> 拒绝当前轮，不能沿用旧 approval。accept 前逐条核对阶段 1 验收标准、CI、merge、部署、包公 approval 和盲区，再执行 multica issue verdict <parent-id> accept --round <round>。\n\nrework 根据拒绝原因重新打开或修正相关子任务，完成后重新走最终 run 和全部 gates。前三次拒绝可返工，下一次进入 escalated 并停止自动派发；此后等待真实人类工作区成员接管。不得直接 done 父任务、写 pipeline metadata、冒充 reviewer、伪造证据或宣称市场成功。",
+          "leader": "管仲 - 产品负责人",
+          "members": [
+            {
+              "name": "管仲 - 产品负责人",
+              "role": "leader"
+            },
+            {
+              "name": "巧匠 - 产品设计 & 增长",
+              "role": "member"
+            },
+            {
+              "name": "鲁班 - 首席架构师",
+              "role": "member"
+            },
+            {
+              "name": "墨子 - 全栈工程师",
+              "role": "member"
+            },
+            {
+              "name": "神机 - 运维工程师",
+              "role": "member"
+            },
+            {
+              "name": "包公 - 质量工程师",
+              "role": "member"
+            }
+          ],
+          "workflow": {
+            "mode": "delivery",
+            "max_active_children": 1,
+            "child_completion_signal": "review_ready",
+            "auto_promote_stage": true,
+            "auto_finalize_parent": true,
+            "require_tests": true,
+            "require_review": true,
+            "require_merge": true,
+            "merge_mode": "integrator",
+            "human_approval_required": false,
+            "final_gates_only": true,
+            "review_agent_id": "{{agent-id:包公 - 质量工程师}}",
+            "require_pipeline_verdict": true,
+            "pipeline": {
+              "max_rounds": 3,
+              "product_agent_id": "{{agent-id:管仲 - 产品负责人}}"
+            }
+          }
+        }
+      ],
+      "autopilots": []
     }
   ]
 }

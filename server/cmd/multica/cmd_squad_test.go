@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func newSquadMemberSetRoleTestCmd() *cobra.Command {
@@ -88,5 +93,136 @@ func TestRunSquadMemberSetRoleValidatesRequiredFlags(t *testing.T) {
 	_ = cmd.Flags().Set("member-id", "member-456")
 	if err := runSquadMemberSetRole(cmd, []string{"squad-123"}); err == nil {
 		t.Fatal("expected missing --role error")
+	}
+}
+
+func newSquadWorkflowPatchTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "squad-update"}
+	addSquadWorkflowFlags(cmd)
+	return cmd
+}
+
+func TestWorkflowPatchFromFlagsBlackboxOptIns(t *testing.T) {
+	const agentUUID = "33333333-3333-3333-3333-333333333333"
+	tests := []struct {
+		name    string
+		flags   map[string]string
+		want    map[string]any
+		wantErr string
+	}{
+		{
+			name: "omitted flags leave stored policy unchanged",
+			want: map[string]any{},
+		},
+		{
+			name: "enabled flags use workflow wire keys without requiring a pipeline replacement",
+			flags: map[string]string{
+				"final-gates-only":         "true",
+				"review-agent":             agentUUID,
+				"require-pipeline-verdict": "true",
+			},
+			want: map[string]any{
+				"final_gates_only":         true,
+				"review_agent_id":          agentUUID,
+				"require_pipeline_verdict": true,
+			},
+		},
+		{
+			name: "explicit false and empty values clear stored opt ins",
+			flags: map[string]string{
+				"final-gates-only":         "false",
+				"review-agent":             "",
+				"require-pipeline-verdict": "false",
+			},
+			want: map[string]any{
+				"final_gates_only":         false,
+				"review_agent_id":          "",
+				"require_pipeline_verdict": false,
+			},
+		},
+		{
+			name: "review agent rejects explicitly disabled review gate",
+			flags: map[string]string{
+				"review-agent":   agentUUID,
+				"require-review": "false",
+			},
+			wantErr: "--review-agent requires --require-review",
+		},
+		{
+			name: "pipeline verdict rejects a cleared replacement pipeline",
+			flags: map[string]string{
+				"require-pipeline-verdict": "true",
+				"pipeline-max-rounds":      "0",
+			},
+			wantErr: "--require-pipeline-verdict requires --pipeline-product-agent",
+		},
+		{
+			name: "pipeline verdict rejects a replacement pipeline without product agent",
+			flags: map[string]string{
+				"require-pipeline-verdict": "true",
+				"pipeline-max-rounds":      "3",
+			},
+			wantErr: "--require-pipeline-verdict requires --pipeline-product-agent",
+		},
+		{
+			name: "reviewer and product agent must differ",
+			flags: map[string]string{
+				"review-agent":           agentUUID,
+				"pipeline-max-rounds":    "3",
+				"pipeline-product-agent": agentUUID,
+			},
+			wantErr: "--review-agent and --pipeline-product-agent must differ",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := newSquadWorkflowPatchTestCmd()
+			for name, value := range tt.flags {
+				if err := cmd.Flags().Set(name, value); err != nil {
+					t.Fatalf("set --%s: %v", name, err)
+				}
+			}
+			patch, err := workflowPatchFromFlags(context.Background(), nil, cmd)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("workflowPatchFromFlags: %v", err)
+			}
+			if !reflect.DeepEqual(patch, tt.want) {
+				t.Fatalf("patch = %#v, want %#v", patch, tt.want)
+			}
+		})
+	}
+}
+
+func TestWorkflowPatchFromFlagsResolvesReviewAgentName(t *testing.T) {
+	const agentUUID = "33333333-3333-3333-3333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/agents" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": agentUUID, "name": "包公 - 质量工程师",
+		}})
+	}))
+	defer srv.Close()
+
+	cmd := newSquadWorkflowPatchTestCmd()
+	if err := cmd.Flags().Set("review-agent", "包公 - 质量工程师"); err != nil {
+		t.Fatalf("set --review-agent: %v", err)
+	}
+	client := cli.NewAPIClient(srv.URL, "workspace-123", "test-token")
+	patch, err := workflowPatchFromFlags(context.Background(), client, cmd)
+	if err != nil {
+		t.Fatalf("workflowPatchFromFlags: %v", err)
+	}
+	if got := patch["review_agent_id"]; got != agentUUID {
+		t.Fatalf("review_agent_id = %#v, want %q", got, agentUUID)
 	}
 }
