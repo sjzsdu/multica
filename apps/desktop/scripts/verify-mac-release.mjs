@@ -5,6 +5,8 @@ export function verifyMacRelease(context, execute = execFileSync) {
   if (context.electronPlatformName !== "darwin") return;
   const policy = context.packager.info.options.publish;
   if (!policy || policy === "never") return;
+  // Unsigned releases cannot pass Gatekeeper or carry a stapled ticket.
+  if (context.packager.platformSpecificBuildOptions?.notarize === false) return;
   // afterSign runs after built-in notarization, before ZIP/DMG creation and
   // publication. Checking in the skill after upload would race CI promotion.
   const app = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);

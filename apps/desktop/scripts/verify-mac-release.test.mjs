@@ -3,10 +3,14 @@ import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
 
 import { verifyMacRelease } from "./verify-mac-release.mjs";
-const context = (publish = "always", platform = "darwin") => ({
+const context = (publish = "always", platform = "darwin", notarize = true) => ({
   appOutDir: "/build path/mac-arm64",
   electronPlatformName: platform,
-  packager: { info: { options: { publish } }, appInfo: { productFilename: "Multica" } },
+  packager: {
+    info: { options: { publish } },
+    appInfo: { productFilename: "Multica" },
+    platformSpecificBuildOptions: { notarize },
+  },
 });
 
 describe("macOS release validation before upload", () => {
@@ -32,6 +36,12 @@ describe("macOS release validation before upload", () => {
     const execute = vi.fn((command) => { if (command === failing) throw new Error("validation failed"); });
     expect(() => verifyMacRelease(context(), execute)).toThrow("validation failed");
     if (failing === "spctl") expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips Gatekeeper and stapler checks when notarization is disabled", () => {
+    const execute = vi.fn();
+    verifyMacRelease(context("always", "darwin", false), execute);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("keeps unsigned local builds and other platforms unchanged", () => {
