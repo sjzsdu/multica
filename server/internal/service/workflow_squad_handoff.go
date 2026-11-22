@@ -60,14 +60,15 @@ func (s *TaskService) createWorkflowAgentDispatchTask(ctx context.Context, issue
 	if s.TxStarter == nil {
 		return db.AgentTaskQueue{}, errors.New("workflow agent dispatch requires a transaction")
 	}
-	params.FireAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
 	params.WorkflowStep = pgtype.Text{String: issue.Status, Valid: true}
 	var task db.AgentTaskQueue
 	err := s.runInTx(ctx, func(q *db.Queries) error {
-		if err := q.LockWorkflowSquadHandoff(ctx, issue.ID); err != nil {
+		lockedAt, err := q.LockWorkflowSquadHandoff(ctx, issue.ID)
+		if err != nil {
 			return err
 		}
-		_, err := q.GetWorkflowAgentDispatchTask(ctx, db.GetWorkflowAgentDispatchTaskParams{
+		params.FireAt = lockedAt
+		_, err = q.GetWorkflowAgentDispatchTask(ctx, db.GetWorkflowAgentDispatchTaskParams{
 			IssueID: issue.ID, AgentID: params.AgentID, SquadID: params.SquadID,
 			DispatchKey: params.WorkflowDispatchKey.String,
 		})

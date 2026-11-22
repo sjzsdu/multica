@@ -34,6 +34,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonSkillBundleUnavailable, "skill_bundle_unavailable"},
 		{ReasonRuntimeCLITimeout, "runtime_cli_timeout"},
 		{ReasonEnvironmentPrepareFailed, "environment_prepare_failed"},
+		{ReasonLocalDirectoryMissing, "local_directory_missing"},
 		{ReasonInvalidTaskIdentity, "invalid_task_identity"},
 		{ReasonRuntimeAccessDenied, "runtime_access_denied"},
 		// Agent-side.
@@ -53,7 +54,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 31; got != want {
+	if got, want := len(cases), 32; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -88,6 +89,7 @@ func TestIsAgentError(t *testing.T) {
 		ReasonSkillBundleUnavailable,
 		ReasonRuntimeCLITimeout,
 		ReasonEnvironmentPrepareFailed,
+		ReasonLocalDirectoryMissing,
 		ReasonInvalidTaskIdentity,
 		ReasonRuntimeAccessDenied,
 	}
@@ -130,8 +132,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 31 {
-		t.Fatalf("AllReasons() returned %d entries, want 31", len(got))
+	if len(got) != 32 {
+		t.Fatalf("AllReasons() returned %d entries, want 32", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -148,8 +150,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 17 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 17", platformCount)
+	if platformCount != 18 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 18", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
@@ -167,7 +169,7 @@ func TestAllReasonsContents(t *testing.T) {
 		ReasonIterationLimit, ReasonAgentBlocked, ReasonLocalDirectoryError,
 		ReasonAPIInvalidRequest, ReasonSkillBundleUnavailable,
 		ReasonRuntimeCLITimeout, ReasonEnvironmentPrepareFailed,
-		ReasonInvalidTaskIdentity, ReasonRuntimeAccessDenied,
+		ReasonLocalDirectoryMissing, ReasonInvalidTaskIdentity, ReasonRuntimeAccessDenied,
 		ReasonAgentProviderAuthOrAccess, ReasonAgentProviderQuotaLimit,
 		ReasonAgentProviderCapacityOrRateLimit, ReasonAgentProviderServerError,
 		ReasonAgentProviderNetwork, ReasonAgentProcessFailure,
