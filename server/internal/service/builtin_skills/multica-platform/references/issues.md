@@ -493,9 +493,7 @@ while a run of yours for the same person is waiting to start on the issue
 joins that run instead of starting another: its instruction and facts appear
 in that run's `[WAKEUP — joined this run]` block, so handle them there.
 
-Event rules, conditions included, also have runaway protection. A rule pauses
-with `paused_reason=loop` when its trigger chain passes through it a third time
-without a person in between, and with `rate` when it has already started 12 runs
-in the past hour. A paused rule stays off until someone turns it back on. Still
-avoid mutually triggering continuous comment subscriptions; when waiting for a
-person's reply, filter that member explicitly.
+Event rules, conditions included, also have runaway protection. A rule pauses with `paused_reason=loop` when its trigger chain passes
+through it a third time without a person in between, and with `rate` when it has already started 12 runs in
+the past hour. A paused rule stays off until someone turns it back on. Still avoid mutually triggering continuous
+comment subscriptions; when waiting for a person's reply, filter that member explicitly.
