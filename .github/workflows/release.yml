@@ -108,11 +108,11 @@ jobs:
 
   release:
     needs: verify
-    # No owner guard in this fork: the `brews` section was dropped from
-    # .goreleaser.yml, so there is no upstream Homebrew tap left to 401
-    # against and no HOMEBREW_TAP_GITHUB_TOKEN to provide. The job must run
-    # on every tag — the Desktop job below depends on it to create the
-    # GitHub Release that electron-builder uploads its installers to.
+    # No owner guard in this fork: Homebrew publishing is skipped below, so
+    # there is no upstream Homebrew tap left to 401 against and no
+    # HOMEBREW_TAP_GITHUB_TOKEN to provide. The job must run on every tag —
+    # the Desktop job below depends on it to create the GitHub Release that
+    # electron-builder uploads its installers to.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -139,7 +139,9 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          # Keep manual reruns working even when the target tag still contains
+          # the upstream brews configuration and its unavailable tap token.
+          args: release --clean --skip=homebrew
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
